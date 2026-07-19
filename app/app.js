@@ -83,7 +83,21 @@
     else if (/\/app\/officials$/.test(path)) officials();
     else if (path === "/app") home();
     registerSW();
+    wireSlashFocus();
   });
+
+  /* `/` focuses the search field from any page — the field on this page if
+     there is one (front page, search page), otherwise a jump to search. */
+  function wireSlashFocus() {
+    document.addEventListener("keydown", e => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      e.preventDefault();
+      const q = $('input[name="q"]');
+      if (q) { q.focus(); q.select(); } else location.href = `${BASE}/s`;
+    });
+  }
 
   /* ================= SCOPE: the town, and the body ==================
      specs/17 §8. The reader picks a town once and every page obeys it; a
@@ -294,7 +308,8 @@
 
   async function filterHome(ed) {
     let shown = 0, hidden = 0;
-    $$(".mcard").forEach(c => {
+    // the lead story re-scopes with the briefs — it carries the same data-town
+    $$(".mcard, .lead").forEach(c => {
       const ok = inScope(c.dataset.town || "", c.dataset.body || "");
       c.hidden = !ok; ok ? shown++ : hidden++;
     });
@@ -389,16 +404,88 @@
 
   /* ================= MEETING ================= */
   let YT = { win: null, loaded: false, ready: false, time: 0, pending: null };
+  let MINIMAP = null, STICKY_NOW = null;
   function meeting() {
     const art = $(".meeting"); if (!art) return;
     const pid = art.dataset.pid;
     getJSON(`${BASE}/meetings/${pid}.json`).then(m => m && hydrateMeeting(m));
     wirePlayer();
     wireTranscriptSeek();
+    wireMoments();
     wireCite(pid);
+    stickyHeader();
     window.addEventListener("message", onYT, false);
     focusHash();
     window.addEventListener("hashchange", focusHash);
+  }
+  /* A moment card seeks the tape, like a transcript line — the href stays a
+     real #t anchor for the reader with JavaScript off. */
+  function wireMoments() {
+    $$(".moment[data-t]").forEach(a => a.addEventListener("click", ev => {
+      ev.preventDefault();
+      const t = +a.dataset.t;
+      const f = $(".player.facade");
+      if (f) loadTape(f.dataset.video, t); else ytSeek(t);
+      history.replaceState(null, "", "#t" + Math.floor(t));
+    }));
+  }
+  /* The sticky mini-header: once the masthead has scrolled away, a slim bar
+     keeps the title, the playing time, and Cite in reach. Built here, not
+     baked, because it is pure enhancement — hidden with JavaScript off. */
+  function stickyHeader() {
+    const h1 = $(".meeting h1"); if (!h1) return;
+    const mh = document.createElement("div");
+    mh.className = "mini-header";
+    mh.innerHTML = `<span class="mh-title">${esc(h1.textContent.trim())}</span>`
+      + `<span class="mh-now" hidden></span>`
+      + `<button class="btn" type="button">⧉ Cite</button>`;
+    mh.querySelector("button").onclick = () => { const c = $(".cite-all"); if (c) c.click(); };
+    document.body.appendChild(mh);
+    STICKY_NOW = mh.querySelector(".mh-now");
+    const mast = $(".masthead");
+    const onScroll = () => mh.classList.toggle("on",
+      mast ? mast.getBoundingClientRect().bottom < 4 : scrollY > 220);
+    addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  }
+  /* The minimap: the meeting at a glance — a vertical timeline with a mark at
+     every scored moment and a line at the playhead. Click to jump. Drawn only
+     when there is room and enough to show; decorative, so it is JS-only. */
+  function buildMinimap(m) {
+    const dur = +m.duration || 0;
+    const moments = m.moments || [];
+    if (!dur || moments.length < 3) return;
+    const mm = document.createElement("div");
+    mm.className = "minimap on";
+    mm.title = "the meeting at a glance — click to jump";
+    mm.setAttribute("aria-hidden", "true");
+    const fill = document.createElement("div");
+    fill.className = "mm-fill"; fill.style.top = "0"; fill.style.bottom = "0";
+    mm.appendChild(fill);
+    moments.forEach(mo => {
+      const d = document.createElement("div");
+      d.className = "mm-mark" + (mo.kind === "question" ? " q" : "");
+      d.style.top = Math.max(0, Math.min(99, mo.t / dur * 100)) + "%";
+      mm.appendChild(d);
+    });
+    const now = document.createElement("div");
+    now.className = "mm-now"; now.hidden = true; mm.appendChild(now);
+    mm.addEventListener("click", e => {
+      const r = mm.getBoundingClientRect();
+      const t = Math.max(0, Math.min(dur, (e.clientY - r.top) / r.height * dur));
+      const f = $(".player.facade");
+      if (f) loadTape(f.dataset.video, t); else ytSeek(t);
+    });
+    document.body.appendChild(mm);
+    MINIMAP = { now, dur };
+  }
+  /* the playhead, reflected in the minimap and the sticky header */
+  function tick(t) {
+    if (MINIMAP && MINIMAP.dur) {
+      MINIMAP.now.hidden = false;
+      MINIMAP.now.style.top = Math.max(0, Math.min(100, t / MINIMAP.dur * 100)) + "%";
+    }
+    if (STICKY_NOW) { STICKY_NOW.hidden = false; STICKY_NOW.textContent = hms(t); }
   }
   function focusHash() {
     const m = location.hash.match(/^#t(\d+)$/); if (!m) return;
@@ -448,7 +535,8 @@
       if (YT.pending != null) { const p = YT.pending; YT.pending = null; ytSeek(p); }
     }
     if (d.info && typeof d.info.currentTime === "number") {
-      YT.time = d.info.currentTime; followAlong(YT.time); strip(YT.time);
+      YT.time = d.info.currentTime;
+      followAlong(YT.time); strip(YT.time); tick(YT.time);
     }
   }
   function wireTranscriptSeek() {
@@ -473,12 +561,11 @@
     if (hit >= 0) rows[hit].classList.add("now");
   }
   function hydrateMeeting(m) {
-    // reading panel (summary already in stub; add decisions/topics/entities)
+    buildMinimap(m);
+    // reading panel (the moments panel already carries decisions/votes/tension/
+    // questions; add the recurring topics and the named entities)
     const an = m.analysis || {};
     const bits = [];
-    if ((an.decisions || []).length)
-      bits.push(panel("motions & decisions", an.decisions.slice(0, 8).map(d =>
-        row(d.t, `${esc(d.text)}${d.outcome ? ` — <b>${esc(d.outcome)}</b>` : ""}`)).join("")));
     if ((an.topics || []).length)
       bits.push(panel("recurring topics", an.topics.slice(0, 12).map(tp =>
         `<a class="bead" href="#t${Math.floor(tp.t||0)}" data-seek="${tp.t||0}">${esc(tp.topic)}</a>`).join(" ")));
@@ -602,6 +689,37 @@
       history.replaceState(null, "", u.pathname + u.search);
       runSearch(val);
     });
+    // instant search: debounced, and never under three characters — a two-letter
+    // query is mostly noise over a lot of postings. Enter (the submit above)
+    // still works for a reader who prefers it.
+    let deb;
+    if (inp) inp.addEventListener("input", () => {
+      clearTimeout(deb);
+      const val = inp.value.trim();
+      if (val.length < 3) { if (!val) { $("#results").innerHTML = ""; selReset(); } return; }
+      deb = setTimeout(() => {
+        const u = new URL(location.href);
+        u.searchParams.set("q", val);
+        history.replaceState(null, "", u.pathname + u.search);
+        runSearch(val);
+      }, 320);
+    });
+    // j / k (or the arrows) walk the hits; Enter opens the selected one
+    document.addEventListener("keydown", e => {
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      const res = $$(".sresult"); if (!res.length) return;
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); selMove(res, 1); }
+      else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); selMove(res, -1); }
+      else if (e.key === "Enter" && res[SEL]) location.href = res[SEL].href;
+    });
+  }
+  let SEL = -1;
+  function selReset() { SEL = -1; }
+  function selMove(res, d) {
+    res.forEach(r => r.classList.remove("sel"));
+    SEL = Math.max(0, Math.min(res.length - 1, (SEL < 0 ? (d > 0 ? -1 : 0) : SEL) + d));
+    const el = res[SEL]; if (el) { el.classList.add("sel"); el.scrollIntoView({ block: "nearest" }); }
   }
   /* Live-first, static-always. The Studio is asked once; whatever it cannot
      do, the prebuilt index does. Note the order: the API call is awaited
@@ -690,10 +808,11 @@
     let ids = [...(sets[0] || [])];
     for (let i = 1; i < sets.length; i++) ids = ids.filter(x => sets[i].has(x));
     // prefer exact-phrase segments on a multi-word query; else keep the AND hits
+    // (hits stays a list of segIds so a peek can reach the ±1 neighbours)
     const phrase = q.trim().toLowerCase();
-    let hits = ids.map(id => segs[id]).filter(Boolean);
+    let hits = ids.filter(id => segs[id]);
     if (terms.length > 1) {
-      const exact = hits.filter(s => String(s[3]).toLowerCase().includes(phrase));
+      const exact = hits.filter(id => String(segs[id][3]).toLowerCase().includes(phrase));
       if (exact.length) hits = exact;
     }
     // scope BEFORE the cut, or the 80-hit ceiling would be spent on meetings
@@ -701,8 +820,8 @@
     // silently return fewer results than it found
     const total = hits.length;
     if (SCOPE.town || SCOPE.body)
-      hits = hits.filter(([mi]) => {
-        const m = meta[mi] || {};
+      hits = hits.filter(id => {
+        const m = meta[segs[id][0]] || {};
         return inScope(m.town || "", m.body || "");
       });
     const cut = hits.length;
@@ -732,18 +851,32 @@
     // be claiming a town for moments the record never learned one for — count
     // them out loud instead
     const noTown = SCOPE.town
-      ? hits.filter(([mi]) => !((meta[mi] || {}).town)).length : 0;
+      ? hits.filter(id => !((meta[segs[id][0]] || {}).town)).length : 0;
     box.innerHTML = `<p class="hint">${hits.length} moment${hits.length>1?"s":""} `
       + (where ? `in ${esc(where)}` : "across the record")
       + (noTown ? ` · ${noTown} from meeting(s) with no town recorded` : "")
       + (where && cut < total ? ` · ${total - cut} more elsewhere on the record` : "")
       + `</p>` +
-      hits.map(([mi, t, spk, text]) => {
+      hits.map(id => {
+        const [mi, t, spk, text] = segs[id];
         const m = meta[mi] || {};
-        return `<a class="sresult" href="${BASE}/m/${m.pid}#t${Math.floor(t)}">
+        return `<a class="sresult" data-sid="${id}" href="${BASE}/m/${m.pid}#t${Math.floor(t)}">
           <span class="ts">${hms(t)}</span>${mark(text, terms)}
-          <span class="smeta">${esc([m.title, m.body, SCOPE.town ? "" : m.town, m.date].filter(Boolean).join(" · "))}${spk ? " · " + esc(spk) : ""}</span></a>`;
+          <span class="smeta">${esc([m.title, m.body, SCOPE.town ? "" : m.town, m.date].filter(Boolean).join(" · "))}${spk ? " · " + esc(spk) : ""}</span>${peek(segs, id, mi)}</a>`;
       }).join("");
+    selReset();
+  }
+  /* The peek: ±1 segment of context from the segs plane, already in hand
+     because the static path loaded it. Shown on hover (CSS); it costs no
+     request, so it never burdens the live path, which does not load segs. */
+  function peek(segs, id, mi) {
+    const ctx = [id - 1, id, id + 1].map(i => segs[i]).filter(s => s && s[0] === mi);
+    if (ctx.length < 2) return "";
+    return `<span class="peek">` + ctx.map(s => {
+      const now = s === segs[id] ? " pk-now" : "";
+      const who = s[2] ? `<b>${esc(s[2])}</b> ` : "";
+      return `<span class="${now.trim()}">${who}${esc(String(s[3]).slice(0, 150))}</span>`;
+    }).join("<br>") + `</span>`;
   }
   function mark(text, terms) {
     let t = esc(text);
@@ -889,7 +1022,7 @@
   let toEl;
   function toast(msg) {
     if (!toEl) { toEl = document.createElement("div"); toEl.className = "citebar";
-      toEl.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:none;background:var(--cream);color:var(--ink);padding:8px 14px";
+      toEl.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:none;background:var(--surface-inverse);color:var(--text-inverse);padding:8px 14px";
       document.body.appendChild(toEl); }
     toEl.textContent = msg; toEl.style.display = "block";
     clearTimeout(toEl._t); toEl._t = setTimeout(() => toEl.style.display = "none", 2600);
