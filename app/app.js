@@ -76,6 +76,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     initScope();
     if (/\/app\/m\//.test(path)) meeting();
+    else if (/\/app\/r$/.test(path)) reel();
     else if (/\/app\/s$/.test(path)) search();
     else if (/\/app\/add$/.test(path)) addMeeting();
     else if (/\/app\/i\//.test(path)) issue();
@@ -408,7 +409,11 @@
   function meeting() {
     const art = $(".meeting"); if (!art) return;
     const pid = art.dataset.pid;
-    getJSON(`${BASE}/meetings/${pid}.json`).then(m => m && hydrateMeeting(m));
+    getJSON(`${BASE}/meetings/${pid}.json`).then(m => {
+      if (!m) return;
+      hydrateMeeting(m);
+      wireComposer(m);   // the reel composer (specs/20 §6, P1)
+    });
     wirePlayer();
     wireTranscriptSeek();
     wireMoments();
@@ -537,6 +542,7 @@
     if (d.info && typeof d.info.currentTime === "number") {
       YT.time = d.info.currentTime;
       followAlong(YT.time); strip(YT.time); tick(YT.time);
+      reelAdvance(YT.time);   // the /app/r viewer, if this page is one
     }
   }
   function wireTranscriptSeek() {
@@ -649,6 +655,410 @@
     parts.push(`${title} (${meta})`);
     parts.push(link);
     navigator.clipboard.writeText(parts.join("\n")).then(() => toast("citation copied — receipts included"));
+  }
+
+  /* ================= THE REEL — compose here, play at /app/r ==============
+     Highlighter's composing half, moved into the browser (specs/20 §6, P1).
+     The rule that governed P0 governs this too: reading and composing live in
+     the web; only rendering media stays at the desk, and the page says so.
+     Every byte of a reel lives in two places and no third — this browser's
+     localStorage while you build it, and the share link once you send it. No
+     account, no server call on this path — the covenant, and a test that
+     proves it. Cross-meeting reels are R3; the model is per-meeting, shaped
+     so a second meeting's moments slot in without a redesign. */
+
+  const REEL_V = "1";                 // the share-link schema version
+  const MIN_CLIP = 1.0;               // a clip shorter than this can't be seen
+  const r1 = n => Math.round((+n || 0) * 10) / 10;   // times to 0.1s
+  const reelKey = pid => "cz-reel-" + pid;
+
+  /* a clip is {start, end} plus the moment it was cut from (t, kind, quote) —
+     the metadata rides along so the tray and the cite sheet never re-fetch. */
+  const clipLen = c => Math.max(0, r1(c.end) - r1(c.start));
+  const reelRuntime = clips => r1(clips.reduce((s, c) => s + clipLen(c), 0));
+
+  /* the share link: /app/r?v=1&m=<pid>&c=<start>-<end>,… — state in the URL,
+     nowhere else. Times are positive, so a bare `-` separates them safely. */
+  const encodeClips = clips => clips.map(c => r1(c.start) + "-" + r1(c.end)).join(",");
+  function shareURL(pid, clips) {
+    return `${location.origin}${BASE}/r?v=${REEL_V}`
+      + `&m=${encodeURIComponent(pid)}&c=${encodeClips(clips)}`;
+  }
+  /* decode a share link's query back into {v, pid, clips:[{start,end}]}. Pure
+     and total: a malformed clip is dropped, never thrown — a link that lost a
+     character in an email should degrade to fewer clips, not a crash. */
+  function decodeReel(search) {
+    const p = new URLSearchParams(search || "");
+    const clips = [];
+    for (const part of (p.get("c") || "").split(",")) {
+      const seg = part.split("-");
+      if (seg.length !== 2) continue;
+      const start = parseFloat(seg[0]), end = parseFloat(seg[1]);
+      if (!isFinite(start) || !isFinite(end) || end <= start) continue;
+      clips.push({ start: r1(start), end: r1(end) });
+    }
+    return { v: p.get("v") || "", pid: (p.get("m") || "").trim(), clips };
+  }
+
+  /* the cite sheet — one receipt per clip: quote, speaker (when the page knew
+     it), body · town · date, and a deep link. The single-line shape copyCite
+     writes, extended to a sequence. */
+  function citeSheet(meta, clips) {
+    const head = `${meta.title} — a reel of ${clips.length} moment`
+      + (clips.length === 1 ? "" : "s") + ` (${hms(reelRuntime(clips))})`;
+    const where = [meta.body, meta.town, meta.date].filter(Boolean).join(" · ");
+    const blocks = clips.map((c, i) => {
+      const link = `${location.origin}${BASE}/m/${meta.pid}#t${Math.floor(c.start)}`;
+      const lines = [`${i + 1}. ${hms(c.start)} — ${c.kind || "moment"}`];
+      if (c.quote) lines.push(`“${c.quote}”`);
+      if (c.speaker) lines.push(`— ${String(c.speaker).replace(/:$/, "")}`);
+      if (where) lines.push(where);
+      lines.push(link);
+      return lines.join("\n");
+    });
+    return [head, ...blocks].join("\n\n");
+  }
+
+  /* the reel.json the desk Highlighter opens to render — the one desk-bound
+     step. Its clips map straight onto highlighter/reel.py's render_reel:
+     ranges=[{start,end}], cards=[{label:quote, t:start}], title. */
+  function reelJSON(meta, clips) {
+    return {
+      schema: "publicrecord.reel/1",
+      title: `${meta.title} — reel`,
+      made_with: "publicrecord.studio",
+      note: "Rendering the video needs the desk — open this in Highlighter "
+        + "(control-z), point it at the meeting's local media, and cut.",
+      meeting: { pid: meta.pid, video_id: meta.video_id || "",
+                 url: meta.url || "", title: meta.title || "",
+                 town: meta.town || "", body: meta.body || "",
+                 date: meta.date || "" },
+      runtime: reelRuntime(clips),
+      share: shareURL(meta.pid, clips),
+      clips: clips.map(c => ({ start: r1(c.start), end: r1(c.end),
+                               kind: c.kind || "moment", quote: c.quote || "",
+                               source_t: c.t == null ? r1(c.start) : r1(c.t) })),
+    };
+  }
+  function downloadReel(meta, clips) {
+    const blob = new Blob([JSON.stringify(reelJSON(meta, clips), null, 2)],
+                          { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${meta.pid || "reel"}.reel.json`;
+    a.click(); URL.revokeObjectURL(a.href);
+    toast("reel.json downloaded — open it at the desk to render");
+  }
+  function copyText(txt, msg) {
+    navigator.clipboard.writeText(txt).then(
+      () => toast(msg),
+      () => toast("couldn’t copy — your browser blocked the clipboard"));
+  }
+
+  /* --- P1a: the composer, on the meeting page --- */
+  let CREEL = null;   // {pid, meta, moments, clips, segs}
+
+  function wireComposer(m) {
+    if (!(m.moments && m.moments.length)) return;
+    const meta = { pid: m.pid, title: m.title || "", town: m.town || "",
+                   body: m.body || "", date: m.date || "",
+                   video_id: m.video_id || "", url: m.url || "",
+                   duration: +m.duration || 0 };
+    // the transcript's segment starts, for trimming a clip to segment bounds
+    const segs = $$("#transcript .seg").map(s => +s.dataset.t)
+      .filter(t => isFinite(t)).sort((a, b) => a - b);
+    CREEL = { pid: m.pid, meta, moments: m.moments, clips: loadReel(m.pid), segs };
+    wireTicks();
+    buildTray();
+    paintTicks();
+  }
+  const loadReel = pid => { try {
+    const a = JSON.parse(localStorage.getItem(reelKey(pid)) || "[]");
+    return Array.isArray(a)
+      ? a.filter(c => c && isFinite(c.start) && isFinite(c.end)) : [];
+  } catch { return []; } };
+  const saveReel = () => { try {
+    localStorage.setItem(reelKey(CREEL.pid), JSON.stringify(CREEL.clips));
+  } catch { /* private mode: the tray still works for this visit */ } };
+
+  function wireTicks() {
+    $$(".mo-card").forEach(card => {
+      const a = card.querySelector(".moment"); if (!a) return;
+      card.dataset.t = r1(+a.dataset.t);
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "mo-tick";
+      b.addEventListener("click", ev => {
+        ev.preventDefault(); ev.stopPropagation(); toggleClip(a);
+      });
+      card.appendChild(b);
+    });
+  }
+  function momentOf(a) {
+    return { t: r1(+a.dataset.t), start: r1(+a.dataset.t),
+             end: r1(+a.dataset.end || (+a.dataset.t + 12)),
+             kind: a.dataset.kind || "moment", quote: a.dataset.quote || "" };
+  }
+  // a clip's identity is (kind, time) — matching the bake's own moment dedup
+  // key (kind, int(t) in web/bake.py). Keying on time alone would collide the
+  // vote and the tension a contested roll call emits at the same second, so
+  // ticking one would silently toggle the other.
+  const clipId = c => (c.kind || "moment") + "@" + r1(c.t);
+  const inReel = mo => CREEL.clips.findIndex(c => clipId(c) === clipId(mo));
+  function toggleClip(a) {
+    const mo = momentOf(a), i = inReel(mo);
+    if (i >= 0) CREEL.clips.splice(i, 1); else CREEL.clips.push(mo);
+    saveReel(); buildTray(); paintTicks();
+    toast(i >= 0 ? "removed from the reel" : "added to the reel");
+  }
+  function paintTicks() {
+    $$(".mo-card").forEach(card => {
+      const a = card.querySelector(".moment"); if (!a) return;
+      const inr = inReel(momentOf(a)) >= 0;
+      card.classList.toggle("in-reel", inr);
+      const b = card.querySelector(".mo-tick");
+      if (b) { b.setAttribute("aria-pressed", inr ? "true" : "false");
+        b.title = inr ? "in the reel — click to remove" : "add to the reel";
+        b.textContent = inr ? "✓ in reel" : "＋ reel"; }
+    });
+  }
+
+  function buildTray() {
+    let tray = $("#reeltray");
+    if (!CREEL.clips.length) { if (tray) tray.remove(); return; }
+    if (!tray) {
+      tray = document.createElement("section");
+      tray.className = "card reeltray"; tray.id = "reeltray";
+      (($(".moments")) || $(".meeting")).after(tray);
+    }
+    const clips = CREEL.clips;
+    const rows = clips.map((c, i) => `<div class="rt-clip" data-i="${i}">
+        <div class="rt-ord">${i + 1}</div>
+        <div class="rt-main">
+          <div class="rt-quote">${esc((c.quote || "").slice(0, 120)) || "(moment)"}</div>
+          <div class="rt-times"><span class="rt-kind">${esc(c.kind || "moment")}</span>
+            <span class="rt-range"><span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span> · ${hms(clipLen(c))}</span></div>
+          <div class="rt-trim" role="group" aria-label="trim clip ${i + 1}">
+            <span class="rt-tl">in</span>
+            <button class="rt-b" type="button" data-act="s-" aria-label="start earlier">◀</button>
+            <button class="rt-b" type="button" data-act="s+" aria-label="start later">▶</button>
+            <span class="rt-tl">out</span>
+            <button class="rt-b" type="button" data-act="e-" aria-label="end earlier">◀</button>
+            <button class="rt-b" type="button" data-act="e+" aria-label="end later">▶</button>
+          </div>
+        </div>
+        <div class="rt-move">
+          <button class="rt-b" type="button" data-act="up" aria-label="move earlier"${i === 0 ? " disabled" : ""}>↑</button>
+          <button class="rt-b" type="button" data-act="down" aria-label="move later"${i === clips.length - 1 ? " disabled" : ""}>↓</button>
+          <button class="rt-b rt-x" type="button" data-act="rm" aria-label="remove">✕</button>
+        </div></div>`).join("");
+    const url = shareURL(CREEL.pid, clips);
+    tray.innerHTML = `<div class="rt-head">
+        <span class="tag">your reel — ${clips.length} clip${clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(clips))} total</span>
+        <button class="btn rt-clear" type="button">clear</button></div>
+      <div class="rt-clips">${rows}</div>
+      <div class="rt-out">
+        <label class="rt-share"><span class="rt-tl">share link</span>
+          <input class="rt-url" readonly value="${esc(url)}"></label>
+        <div class="rt-btns">
+          <button class="btn primary" type="button" data-out="link">⧉ Copy share link</button>
+          <button class="btn" type="button" data-out="cite">⧉ Copy cite sheet</button>
+          <button class="btn" type="button" data-out="json">⬇ reel.json</button></div></div>
+      <p class="hint">The reel lives in this link and this browser — no account,
+        no server. Play it back in <a href="${esc(url)}">the viewer</a>.
+        <b>Rendering the video needs the desk</b> — the reel.json opens in
+        Highlighter.</p>`;
+    wireTray();
+  }
+  function wireTray() {
+    const tray = $("#reeltray"); if (!tray) return;
+    $(".rt-clear", tray).onclick = () => {
+      CREEL.clips = []; saveReel(); buildTray(); paintTicks(); toast("reel cleared");
+    };
+    $$(".rt-clip", tray).forEach(rowEl => {
+      const i = +rowEl.dataset.i;
+      $$(".rt-b", rowEl).forEach(b => b.onclick = () => clipAct(i, b.dataset.act));
+    });
+    $$("[data-out]", tray).forEach(b => b.onclick = () => output(b.dataset.out));
+    const url = $(".rt-url", tray); if (url) url.onclick = () => url.select();
+  }
+  function clipAct(i, act) {
+    const clips = CREEL.clips, c = clips[i]; if (!c) return;
+    const dur = CREEL.meta.duration || 1e9;
+    if (act === "rm") clips.splice(i, 1);
+    else if (act === "up" && i > 0) clips.splice(i - 1, 0, clips.splice(i, 1)[0]);
+    else if (act === "down" && i < clips.length - 1) clips.splice(i + 1, 0, clips.splice(i, 1)[0]);
+    else if (act[0] === "s") c.start = r1(Math.max(0, Math.min(trimTo(c.start, act[1], dur), c.end - MIN_CLIP)));
+    else if (act[0] === "e") c.end = r1(Math.min(dur, Math.max(trimTo(c.end, act[1], dur), c.start + MIN_CLIP)));
+    saveReel(); buildTray(); paintTicks();
+  }
+  /* trim to segment bounds: step a clip edge to the next/previous transcript
+     segment boundary (the seg starts already on the page); with no transcript
+     to snap to, nudge two seconds. */
+  function trimTo(t, dir, dur) {
+    const segs = CREEL.segs;
+    if (segs && segs.length) {
+      if (dir === "+") { const nx = segs.find(s => s > t + 0.05);
+        return nx == null ? Math.min(dur, t + 2) : nx; }
+      const pv = segs.filter(s => s < t - 0.05).pop();
+      return pv == null ? Math.max(0, t - 2) : pv;
+    }
+    return dir === "+" ? Math.min(dur, t + 2) : Math.max(0, t - 2);
+  }
+  function output(kind) {
+    const clips = CREEL.clips; if (!clips.length) return;
+    if (kind === "link") copyText(shareURL(CREEL.pid, clips), "share link copied");
+    else if (kind === "cite") {
+      // enrich each clip with the speaker the transcript knows, like copyCite
+      const withSpk = clips.map(c => ({ ...c, speaker: speakerAt(c.start) }));
+      copyText(citeSheet(CREEL.meta, withSpk), "cite sheet copied — receipts for every clip");
+    } else if (kind === "json") downloadReel(CREEL.meta, clips);
+  }
+  /* the speaker at a time, read from the transcript already on the page — the
+     same walk copyCite does for a single selection */
+  function speakerAt(t) {
+    let spk = "";
+    for (const r of $$("#transcript .seg")) {
+      if (+r.dataset.t > t + 0.05) break;
+      const s = r.querySelector(".spk"); if (s) spk = s.textContent || spk;
+    }
+    return spk;
+  }
+
+  /* --- P1b: the /app/r viewer --- */
+  let REELPLAY = null;
+
+  async function reel() {
+    const stage = $("#reelstage"), cites = $("#reelcites");
+    if (!stage) return;
+    const st = decodeReel(location.search);
+    if (st.v && st.v !== REEL_V) return reelMessage(cites,
+      "This reel was shared from a newer version of the record. Update, or open "
+      + "the meeting it came from to read the moments in place.");
+    if (!st.pid || !st.clips.length) return reelMessage(cites,
+      `This link doesn’t carry a reel. Open <a href="${BASE}/">the record</a> to `
+      + "read a meeting, then tick its moments into a reel.");
+    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(st.pid)}.json`);
+    if (!m) return reelMessage(cites,
+      "The meeting this reel was cut from isn’t in this pressing of the record. "
+      + "It may have been curated away, or pressed under a different id.");
+    const meta = { pid: st.pid, title: m.title || "", town: m.town || "",
+                   body: m.body || "", date: m.date || "",
+                   video_id: m.video_id || "", url: m.url || "",
+                   duration: +m.duration || 0 };
+    // enrich each clip with the nearest moment's quote + kind for display
+    const clips = st.clips.map(c => {
+      const mo = nearestMoment(m.moments || [], c.start);
+      return { start: c.start, end: c.end, t: mo ? r1(mo.t) : c.start,
+               kind: mo ? mo.kind : "moment", quote: mo ? mo.quote : "" };
+    });
+    document.title = `${meta.title} — a reel · publicrecord.studio`;
+    buildViewer(stage, cites, meta, clips, m);
+  }
+  function nearestMoment(moments, t) {
+    let best = null, bd = 1e9;
+    for (const mo of moments) {
+      const a = r1(mo.t), b = r1(mo.end || mo.t);
+      const d = (t >= a - 0.5 && t <= b + 0.5) ? 0 : Math.abs(a - t);
+      if (d < bd) { bd = d; best = mo; }
+    }
+    return best;
+  }
+  function buildViewer(stage, cites, meta, clips, m) {
+    const thumb = m.thumb || "";
+    if (meta.video_id) {
+      stage.innerHTML =
+        `<div class="player facade" data-video="${esc(meta.video_id)}">`
+        + (thumb ? `<img src="${esc(thumb)}" alt="" class="pfacade-img">` : "")
+        + `<button class="playbtn" type="button" aria-label="Play the reel">▶</button>`
+        + `<span class="phint">tap to play the reel · ${clips.length} clip${clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(clips))} · nothing plays until you do</span></div>`
+        + `<p class="reel-now" id="reelnow" hidden></p>`;
+      $(".player.facade", stage).addEventListener("click", () => startReel(clips));
+      window.addEventListener("message", onYT, false);
+    } else {
+      stage.innerHTML = '<div class="player local"><p class="phint">this '
+        + 'meeting’s tape lives at the station — the reel below is its citations.'
+        + '</p></div>';
+    }
+    REELPLAY = { clips, i: 0, active: false, armed: false, now: $("#reelnow") };
+    const head = `<div class="sectionhead"><span class="kicker">the reel — `
+      + `${clips.length} moment${clips.length > 1 ? "s" : ""} from `
+      + `<a href="${BASE}/m/${esc(meta.pid)}">${esc(meta.title)}</a>, in order · `
+      + `${hms(reelRuntime(clips))}</span></div>`;
+    const rows = clips.map((c, i) => `<a class="reelcite" data-i="${i}" href="${BASE}/m/${esc(meta.pid)}#t${Math.floor(c.start)}">
+        <span class="rc-ord">${i + 1}</span>
+        <span class="rc-body"><span class="rc-quote">${esc(c.quote || "(moment)")}</span>
+          <span class="rc-meta"><span class="rt-kind">${esc(c.kind)}</span>
+            <span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span></span>
+        </span></a>`).join("");
+    const where = [meta.body, meta.town, meta.date].filter(Boolean).join(" · ");
+    cites.innerHTML = head + `<div class="reelcitelist">${rows}</div>`
+      + (where ? `<p class="rc-where">${esc(where)}</p>` : "")
+      + `<div class="rt-btns">
+          <button class="btn" type="button" data-rv="cite">⧉ Copy cite sheet</button>
+          <button class="btn" type="button" data-rv="json">⬇ reel.json</button>
+          <a class="btn" href="${BASE}/m/${esc(meta.pid)}">open the meeting →</a></div>
+        <p class="hint">This reel lives in the link you followed — no account, no
+          server kept it. <b>Rendering it as a video needs the desk</b> — the
+          reel.json opens in Highlighter.</p>`;
+    $$("[data-rv]", cites).forEach(b => b.onclick = () =>
+      b.dataset.rv === "cite" ? copyText(citeSheet(meta, clips), "cite sheet copied")
+                              : downloadReel(meta, clips));
+    // clicking a cite while the reel plays jumps to that clip; otherwise the
+    // deep link into the meeting is followed (the JS-off behaviour too)
+    $$(".reelcite", cites).forEach(a => a.addEventListener("click", ev => {
+      if (!REELPLAY.active) return;
+      ev.preventDefault();
+      REELPLAY.i = +a.dataset.i; REELPLAY.armed = false;
+      ytSeek(REELPLAY.clips[REELPLAY.i].start); reelShow();
+    }));
+  }
+  function startReel(clips) {
+    REELPLAY.i = 0; REELPLAY.active = true; REELPLAY.armed = false;
+    const f = $(".player.facade");
+    if (f) loadTape(f.dataset.video, clips[0].start); else ytSeek(clips[0].start);
+    reelShow();
+  }
+  /* the seek engine, clip to clip. Clips play in reel order, not chronological,
+     so after a clip ends the next start may be *earlier* in the tape — the
+     `armed` gate waits for the seek to land near the new clip's start before it
+     watches that clip's end, so a stale time report can't skip a clip. */
+  function reelAdvance(t) {
+    if (!REELPLAY || !REELPLAY.active) return;
+    const c = REELPLAY.clips[REELPLAY.i]; if (!c) return;
+    if (!REELPLAY.armed) {
+      // arm only on a report that lands inside the clip and BEFORE its end
+      // threshold — so a stale time at/after the end (two of which can arrive
+      // while a backward seek buffers) can neither arm nor, on the next tick,
+      // skip a short clip entirely
+      if (t >= c.start - 0.75 && t < c.end - 0.12) REELPLAY.armed = true;
+      return;
+    }
+    if (t >= c.end - 0.12) {
+      REELPLAY.armed = false;
+      if (REELPLAY.i < REELPLAY.clips.length - 1) {
+        REELPLAY.i++; ytSeek(REELPLAY.clips[REELPLAY.i].start); reelShow();
+      } else {
+        REELPLAY.active = false; ytSend("cmd", "pauseVideo", []); reelShow(true);
+      }
+    }
+  }
+  function reelShow(done) {
+    if (!REELPLAY) return;
+    const now = REELPLAY.now, c = REELPLAY.clips[REELPLAY.i];
+    if (now) {
+      now.hidden = false;
+      now.innerHTML = (done || !c)
+        ? `<b>reel complete</b> — ${REELPLAY.clips.length} clip${REELPLAY.clips.length > 1 ? "s" : ""} played`
+        : `<span class="rn-ord">clip ${REELPLAY.i + 1} of ${REELPLAY.clips.length}</span>`
+          + `<span class="ts">${hms(c.start)}</span> `
+          + `<span class="rn-quote">${esc(c.quote || c.kind || "")}</span>`;
+    }
+    $$(".reelcite").forEach((a, i) =>
+      a.classList.toggle("on", REELPLAY.active && i === REELPLAY.i));
+  }
+  function reelMessage(el, html) {
+    if (el) el.innerHTML = `<p class="hint">${html}</p>`;
+    const stage = $("#reelstage"); if (stage) stage.innerHTML = "";
   }
 
   /* ================= SEARCH ================= */
