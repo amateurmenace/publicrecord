@@ -708,7 +708,8 @@
       + (clips.length === 1 ? "" : "s") + ` (${hms(reelRuntime(clips))})`;
     const where = [meta.body, meta.town, meta.date].filter(Boolean).join(" · ");
     const blocks = clips.map((c, i) => {
-      const link = `${location.origin}${BASE}/m/${meta.pid}#t${Math.floor(c.start)}`;
+      // deep-link to the anchor (a real transcript #t), not the padded clip start
+      const link = `${location.origin}${BASE}/m/${meta.pid}#t${Math.floor(c.t != null ? c.t : c.start)}`;
       const lines = [`${i + 1}. ${hms(c.start)} — ${c.kind || "moment"}`];
       if (c.quote) lines.push(`“${c.quote}”`);
       if (c.speaker) lines.push(`— ${String(c.speaker).replace(/:$/, "")}`);
@@ -794,8 +795,11 @@
     });
   }
   function momentOf(a) {
-    return { t: r1(+a.dataset.t), start: r1(+a.dataset.t),
-             end: r1(+a.dataset.end || (+a.dataset.t + 12)),
+    // t is the anchor (the panel seek + the clip's identity); [start,end] is the
+    // padded clip window the bake computed — the reel plays the whole sentence
+    const t = r1(+a.dataset.t);
+    return { t, start: r1(+a.dataset.start || t),
+             end: r1(+a.dataset.end || (t + 12)),
              kind: a.dataset.kind || "moment", quote: a.dataset.quote || "" };
   }
   // a clip's identity is (kind, time) — matching the bake's own moment dedup
@@ -955,10 +959,12 @@
     buildViewer(stage, cites, meta, clips, m);
   }
   function nearestMoment(moments, t) {
+    // a shared clip's start is the moment's padded window start, so match the
+    // whole [start,end] window (not just the anchor) before falling to nearest
     let best = null, bd = 1e9;
     for (const mo of moments) {
-      const a = r1(mo.t), b = r1(mo.end || mo.t);
-      const d = (t >= a - 0.5 && t <= b + 0.5) ? 0 : Math.abs(a - t);
+      const a = r1(mo.start != null ? mo.start : mo.t), b = r1(mo.end || mo.t);
+      const d = (t >= a - 0.5 && t <= b + 0.5) ? 0 : Math.abs(r1(mo.t) - t);
       if (d < bd) { bd = d; best = mo; }
     }
     return best;
@@ -984,7 +990,7 @@
       + `${clips.length} moment${clips.length > 1 ? "s" : ""} from `
       + `<a href="${BASE}/m/${esc(meta.pid)}">${esc(meta.title)}</a>, in order · `
       + `${hms(reelRuntime(clips))}</span></div>`;
-    const rows = clips.map((c, i) => `<a class="reelcite" data-i="${i}" href="${BASE}/m/${esc(meta.pid)}#t${Math.floor(c.start)}">
+    const rows = clips.map((c, i) => `<a class="reelcite" data-i="${i}" href="${BASE}/m/${esc(meta.pid)}#t${Math.floor(c.t != null ? c.t : c.start)}">
         <span class="rc-ord">${i + 1}</span>
         <span class="rc-body"><span class="rc-quote">${esc(c.quote || "(moment)")}</span>
           <span class="rc-meta"><span class="rt-kind">${esc(c.kind)}</span>
