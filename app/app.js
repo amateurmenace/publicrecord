@@ -537,7 +537,14 @@
     let d; try { d = JSON.parse(e.data); } catch { return; }
     if (d.event === "onReady" || d.event === "initialDelivery") {
       YT.ready = true; ytSend("listening");
-      if (YT.pending != null) { const p = YT.pending; YT.pending = null; ytSeek(p); }
+      // a cross-meeting switch requested before the player was ready (a cite
+      // tapped during the load gap) loads now, ahead of any stashed same-tape seek
+      if (REELPLAY && REELPLAY.pending) {
+        const pv = REELPLAY.pending; REELPLAY.pending = null; REELPLAY.settling = true;
+        if (typeof setTimeout === "function")
+          setTimeout(() => { if (REELPLAY) REELPLAY.settling = false; }, 500);
+        ytSend("cmd", "loadVideoById", [{ videoId: pv.vid, startSeconds: pv.start }]);
+      } else if (YT.pending != null) { const p = YT.pending; YT.pending = null; ytSeek(p); }
     }
     if (d.info && typeof d.info.currentTime === "number") {
       YT.time = d.info.currentTime;
@@ -667,50 +674,81 @@
      proves it. Cross-meeting reels are R3; the model is per-meeting, shaped
      so a second meeting's moments slot in without a redesign. */
 
-  const REEL_V = "1";                 // the share-link schema version
+  const REEL_V = "1";                 // the DEFAULT schema — a single-meeting link
+  const REEL_VS = ["1", "2"];         // schemas the viewer reads: v1 (one meeting), v2 (across meetings)
   const MIN_CLIP = 1.0;               // a clip shorter than this can't be seen
   const r1 = n => Math.round((+n || 0) * 10) / 10;   // times to 0.1s
-  const reelKey = pid => "cz-reel-" + pid;
+  const REEL_KEY = "cz-reel";         // one tray, spanning meetings (specs/20 §7.9 P2-B)
 
-  /* a clip is {start, end} plus the moment it was cut from (t, kind, quote) —
-     the metadata rides along so the tray and the cite sheet never re-fetch. */
+  /* a clip is {start, end} plus the moment it was cut from (t, kind, quote) and,
+     once a reel spans meetings, the meeting it came from (pid, video_id, mtitle,
+     body, town, date) — the metadata rides along so the tray, the cite sheet and
+     the viewer never re-fetch what the reader already saw. */
   const clipLen = c => Math.max(0, r1(c.end) - r1(c.start));
   const reelRuntime = clips => r1(clips.reduce((s, c) => s + clipLen(c), 0));
 
-  /* the share link: /app/r?v=1&m=<pid>&c=<start>-<end>,… — state in the URL,
-     nowhere else. Times are positive, so a bare `-` separates them safely. */
+  /* the share link. One meeting → the v1 form, byte-identical to every link and
+     kit page already in the wild: /app/r?v=1&m=<pid>&c=<start>-<end>,… . More
+     than one → v2, each clip prefixed with its own meeting:
+     /app/r?v=2&c=<pid>:<start>-<end>,… . Times are positive so a bare `-` splits
+     them; a YouTube id carries no `:`, so the first `:` splits the meeting off. */
   const encodeClips = clips => clips.map(c => r1(c.start) + "-" + r1(c.end)).join(",");
+  const encodeClipsX = clips => clips.map(c =>
+    `${encodeURIComponent(c.pid)}:${r1(c.start)}-${r1(c.end)}`).join(",");
   function shareURL(pid, clips) {
     return `${location.origin}${BASE}/r?v=${REEL_V}`
       + `&m=${encodeURIComponent(pid)}&c=${encodeClips(clips)}`;
   }
-  /* decode a share link's query back into {v, pid, clips:[{start,end}]}. Pure
-     and total: a malformed clip is dropped, never thrown — a link that lost a
-     character in an email should degrade to fewer clips, not a crash. */
+  /* the composer's link builder: v1 while the reel is one meeting (so nothing
+     about an existing link changes), v2 the moment it spans two. */
+  function reelShareURL(clips) {
+    const pids = [...new Set(clips.map(c => c.pid).filter(Boolean))];
+    if (pids.length <= 1)
+      return shareURL(pids[0] || (clips[0] && clips[0].pid) || "", clips);
+    return `${location.origin}${BASE}/r?v=2&c=${encodeClipsX(clips)}`;
+  }
+  const reelPids = clips => [...new Set(clips.map(c => c.pid).filter(Boolean))];
+  /* decode a share link's query into {v, pid, clips:[{pid,start,end}]}. Pure and
+     total: a malformed clip is dropped, never thrown — a link that lost a
+     character in an email degrades to fewer clips, not a crash. A v1 clip
+     inherits the single `m=`; a v2 clip carries its own `<pid>:` prefix. */
   function decodeReel(search) {
     const p = new URLSearchParams(search || "");
+    const m = (p.get("m") || "").trim();
     const clips = [];
     for (const part of (p.get("c") || "").split(",")) {
-      const seg = part.split("-");
+      let pid = m, range = part;
+      const colon = part.indexOf(":");
+      if (colon > 0) { pid = decodeURIComponent(part.slice(0, colon)).trim(); range = part.slice(colon + 1); }
+      const seg = range.split("-");
       if (seg.length !== 2) continue;
       const start = parseFloat(seg[0]), end = parseFloat(seg[1]);
       if (!isFinite(start) || !isFinite(end) || end <= start) continue;
-      clips.push({ start: r1(start), end: r1(end) });
+      clips.push({ pid, start: r1(start), end: r1(end) });
     }
-    return { v: p.get("v") || "", pid: (p.get("m") || "").trim(), clips };
+    return { v: p.get("v") || "", pid: (clips[0] && clips[0].pid) || m, clips };
   }
 
   /* the cite sheet — one receipt per clip: quote, speaker (when the page knew
      it), body · town · date, and a deep link. The single-line shape copyCite
      writes, extended to a sequence. */
   function citeSheet(meta, clips) {
-    const head = `${meta.title} — a reel of ${clips.length} moment`
-      + (clips.length === 1 ? "" : "s") + ` (${hms(reelRuntime(clips))})`;
-    const where = [meta.body, meta.town, meta.date].filter(Boolean).join(" · ");
+    const pids = [...new Set(clips.map(c => c.pid).filter(Boolean))];
+    const head = (pids.length > 1
+        ? `A reel of ${clips.length} moments across ${pids.length} meetings`
+        : `${meta.title} — a reel of ${clips.length} moment`
+          + (clips.length === 1 ? "" : "s"))
+      + ` (${hms(reelRuntime(clips))})`;
     const blocks = clips.map((c, i) => {
+      // per-clip meeting when the reel spans meetings; else the one meta passed
+      const pid = c.pid || meta.pid;
+      const where = [c.body || meta.body, c.town || meta.town,
+                     c.date || meta.date].filter(Boolean).join(" · ");
       // deep-link to the anchor (a real transcript #t), not the padded clip start
-      const link = `${location.origin}${BASE}/m/${meta.pid}#t${Math.floor(c.t != null ? c.t : c.start)}`;
+      const link = `${location.origin}${BASE}/m/${pid}#t${Math.floor(c.t != null ? c.t : c.start)}`;
       const lines = [`${i + 1}. ${hms(c.start)} — ${c.kind || "moment"}`];
+      // name each clip's meeting once the reel crosses more than one
+      if (c.mtitle && c.mtitle !== meta.title) lines.push(`— from ${c.mtitle}`);
       if (c.quote) lines.push(`“${c.quote}”`);
       if (c.speaker) lines.push(`— ${String(c.speaker).replace(/:$/, "")}`);
       if (where) lines.push(where);
@@ -768,18 +806,49 @@
     // the transcript's segment starts, for trimming a clip to segment bounds
     const segs = $$("#transcript .seg").map(s => +s.dataset.t)
       .filter(t => isFinite(t)).sort((a, b) => a - b);
-    CREEL = { pid: m.pid, meta, moments: m.moments, clips: loadReel(m.pid), segs };
+    CREEL = { pid: m.pid, meta, moments: m.moments, clips: loadReel(), segs };
     wireTicks();
     buildTray();
     paintTicks();
   }
-  const loadReel = pid => { try {
-    const a = JSON.parse(localStorage.getItem(reelKey(pid)) || "[]");
+  // a clip's storage key, independent of the meeting on screen (unlike clipId,
+  // which reads CREEL): a clip already carries its own pid.
+  const clipKey = c => (c.pid || "") + "@" + (c.kind || "moment") + "@" + r1(c.t);
+  /* the tray is one reel across meetings (specs/20 §7.9 P2-B): a single global
+     key, each clip tagged with the meeting it came from. Every pre-P2-B
+     per-meeting draft (`cz-reel-<pid>`) is folded into the global reel once —
+     tagged, deduped — and removed, so nothing is lost, orphaned, or resurrected
+     after a later clear. */
+  function loadReel() {
+    const clips = readReel(REEL_KEY);
+    try {
+      const olds = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf("cz-reel-") === 0) olds.push(k);
+      }
+      if (olds.length) {
+        const seen = new Set(clips.map(clipKey));
+        for (const k of olds) {
+          const pid = k.slice("cz-reel-".length);
+          for (const c of readReel(k)) {
+            const tagged = { ...c, pid };
+            if (!seen.has(clipKey(tagged))) { clips.push(tagged); seen.add(clipKey(tagged)); }
+          }
+          localStorage.removeItem(k);
+        }
+        localStorage.setItem(REEL_KEY, JSON.stringify(clips));
+      }
+    } catch { /* storage disabled — the global reel still works for this visit */ }
+    return clips;
+  }
+  function readReel(key) { try {
+    const a = JSON.parse(localStorage.getItem(key) || "[]");
     return Array.isArray(a)
       ? a.filter(c => c && isFinite(c.start) && isFinite(c.end)) : [];
-  } catch { return []; } };
+  } catch { return []; } }
   const saveReel = () => { try {
-    localStorage.setItem(reelKey(CREEL.pid), JSON.stringify(CREEL.clips));
+    localStorage.setItem(REEL_KEY, JSON.stringify(CREEL.clips));
   } catch { /* private mode: the tray still works for this visit */ } };
 
   function wireTicks() {
@@ -802,15 +871,19 @@
              end: r1(+a.dataset.end || (t + 12)),
              kind: a.dataset.kind || "moment", quote: a.dataset.quote || "" };
   }
-  // a clip's identity is (kind, time) — matching the bake's own moment dedup
-  // key (kind, int(t) in web/bake.py). Keying on time alone would collide the
-  // vote and the tension a contested roll call emits at the same second, so
-  // ticking one would silently toggle the other.
-  const clipId = c => (c.kind || "moment") + "@" + r1(c.t);
+  // a clip's identity is (meeting, kind, time) — the bake's own moment dedup key
+  // (kind, int(t) in web/bake.py) plus the meeting, so a reel can hold the same
+  // kind+second from two meetings, and a tick here toggles only its own clip. A
+  // moment read off this page carries no pid, so it stands for this meeting.
+  const clipId = c => (c.pid || CREEL.pid) + "@" + (c.kind || "moment") + "@" + r1(c.t);
   const inReel = mo => CREEL.clips.findIndex(c => clipId(c) === clipId(mo));
   function toggleClip(a) {
     const mo = momentOf(a), i = inReel(mo);
-    if (i >= 0) CREEL.clips.splice(i, 1); else CREEL.clips.push(mo);
+    if (i >= 0) CREEL.clips.splice(i, 1);
+    else CREEL.clips.push({ ...mo, pid: CREEL.pid, video_id: CREEL.meta.video_id,
+                            mtitle: CREEL.meta.title, body: CREEL.meta.body,
+                            town: CREEL.meta.town, date: CREEL.meta.date,
+                            duration: CREEL.meta.duration || 0 });
     saveReel(); buildTray(); paintTicks();
     toast(i >= 0 ? "removed from the reel" : "added to the reel");
   }
@@ -835,9 +908,13 @@
       (($(".moments")) || $(".meeting")).after(tray);
     }
     const clips = CREEL.clips;
-    const rows = clips.map((c, i) => `<div class="rt-clip" data-i="${i}">
+    const multi = reelPids(clips).length > 1;
+    const rows = clips.map((c, i) => {
+      const other = c.pid && c.pid !== CREEL.pid;   // a clip from another meeting than the one on screen
+      return `<div class="rt-clip${other ? " rt-other" : ""}" data-i="${i}">
         <div class="rt-ord">${i + 1}</div>
         <div class="rt-main">
+          ${(multi || other) ? `<div class="rt-from">${esc(c.mtitle || c.pid || "another meeting")}</div>` : ""}
           <div class="rt-quote">${esc((c.quote || "").slice(0, 120)) || "(moment)"}</div>
           <div class="rt-times"><span class="rt-kind">${esc(c.kind || "moment")}</span>
             <span class="rt-range"><span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span> · ${hms(clipLen(c))}</span></div>
@@ -854,10 +931,12 @@
           <button class="rt-b" type="button" data-act="up" aria-label="move earlier"${i === 0 ? " disabled" : ""}>↑</button>
           <button class="rt-b" type="button" data-act="down" aria-label="move later"${i === clips.length - 1 ? " disabled" : ""}>↓</button>
           <button class="rt-b rt-x" type="button" data-act="rm" aria-label="remove">✕</button>
-        </div></div>`).join("");
-    const url = shareURL(CREEL.pid, clips);
+        </div></div>`;
+    }).join("");
+    const url = reelShareURL(clips);
+    const span = multi ? ` · ${reelPids(clips).length} meetings` : "";
     tray.innerHTML = `<div class="rt-head">
-        <span class="tag">your reel — ${clips.length} clip${clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(clips))} total</span>
+        <span class="tag">your reel — ${clips.length} clip${clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(clips))} total${span}</span>
         <button class="btn rt-clear" type="button">clear</button></div>
       <div class="rt-clips">${rows}</div>
       <div class="rt-out">
@@ -866,11 +945,12 @@
         <div class="rt-btns">
           <button class="btn primary" type="button" data-out="link">⧉ Copy share link</button>
           <button class="btn" type="button" data-out="cite">⧉ Copy cite sheet</button>
-          <button class="btn" type="button" data-out="json">⬇ reel.json</button></div></div>
+          ${multi ? "" : '<button class="btn" type="button" data-out="json">⬇ reel.json</button>'}</div></div>
       <p class="hint">The reel lives in this link and this browser — no account,
         no server. Play it back in <a href="${esc(url)}">the viewer</a>.
-        <b>Rendering the video needs the desk</b> — the reel.json opens in
-        Highlighter.</p>`;
+        ${multi
+          ? "<b>This reel spans meetings</b> — it plays and cites here; rendering one video across meetings is a desk step still to come."
+          : "<b>Rendering the video needs the desk</b> — the reel.json opens in Highlighter."}</p>`;
     wireTray();
   }
   function wireTray() {
@@ -887,19 +967,22 @@
   }
   function clipAct(i, act) {
     const clips = CREEL.clips, c = clips[i]; if (!c) return;
-    const dur = CREEL.meta.duration || 1e9;
+    // trimming snaps to transcript segment bounds, which are only on the page for
+    // THIS meeting; a clip from another meeting nudges by two seconds instead.
+    const own = !c.pid || c.pid === CREEL.pid;
+    const dur = own ? (CREEL.meta.duration || 1e9) : (c.duration || 1e9);
     if (act === "rm") clips.splice(i, 1);
     else if (act === "up" && i > 0) clips.splice(i - 1, 0, clips.splice(i, 1)[0]);
     else if (act === "down" && i < clips.length - 1) clips.splice(i + 1, 0, clips.splice(i, 1)[0]);
-    else if (act[0] === "s") c.start = r1(Math.max(0, Math.min(trimTo(c.start, act[1], dur), c.end - MIN_CLIP)));
-    else if (act[0] === "e") c.end = r1(Math.min(dur, Math.max(trimTo(c.end, act[1], dur), c.start + MIN_CLIP)));
+    else if (act[0] === "s") c.start = r1(Math.max(0, Math.min(trimTo(c.start, act[1], dur, own), c.end - MIN_CLIP)));
+    else if (act[0] === "e") c.end = r1(Math.min(dur, Math.max(trimTo(c.end, act[1], dur, own), c.start + MIN_CLIP)));
     saveReel(); buildTray(); paintTicks();
   }
   /* trim to segment bounds: step a clip edge to the next/previous transcript
      segment boundary (the seg starts already on the page); with no transcript
-     to snap to, nudge two seconds. */
-  function trimTo(t, dir, dur) {
-    const segs = CREEL.segs;
+     to snap to — no page segs, or a clip from another meeting — nudge two seconds. */
+  function trimTo(t, dir, dur, own) {
+    const segs = own ? CREEL.segs : null;
     if (segs && segs.length) {
       if (dir === "+") { const nx = segs.find(s => s > t + 0.05);
         return nx == null ? Math.min(dur, t + 2) : nx; }
@@ -908,14 +991,26 @@
     }
     return dir === "+" ? Math.min(dur, t + 2) : Math.max(0, t - 2);
   }
+  /* the meeting a single-meeting reel belongs to: this page's when its clips are
+     from here, else reconstructed from what a clip carries (a reel built on
+     another meeting, viewed from this one). */
+  function reelMeta(clips) {
+    if (clips.every(c => !c.pid || c.pid === CREEL.pid)) return CREEL.meta;
+    const c = clips[0] || {};
+    return { pid: c.pid || "", title: c.mtitle || "", town: c.town || "",
+             body: c.body || "", date: c.date || "", video_id: c.video_id || "",
+             url: c.url || "", duration: 0 };
+  }
   function output(kind) {
     const clips = CREEL.clips; if (!clips.length) return;
-    if (kind === "link") copyText(shareURL(CREEL.pid, clips), "share link copied");
+    if (kind === "link") copyText(reelShareURL(clips), "share link copied");
     else if (kind === "cite") {
-      // enrich each clip with the speaker the transcript knows, like copyCite
-      const withSpk = clips.map(c => ({ ...c, speaker: speakerAt(c.start) }));
-      copyText(citeSheet(CREEL.meta, withSpk), "cite sheet copied — receipts for every clip");
-    } else if (kind === "json") downloadReel(CREEL.meta, clips);
+      // the transcript on the page only knows this meeting's speakers; enrich a
+      // clip's speaker only when it is from here (a cross-meeting clip keeps its own)
+      const withSpk = clips.map(c => (!c.pid || c.pid === CREEL.pid)
+        ? { ...c, speaker: speakerAt(c.start) } : c);
+      copyText(citeSheet(reelMeta(clips), withSpk), "cite sheet copied — receipts for every clip");
+    } else if (kind === "json") downloadReel(reelMeta(clips), clips);
   }
   /* the speaker at a time, read from the transcript already on the page — the
      same walk copyCite does for a single selection */
@@ -934,29 +1029,37 @@
   async function reel() {
     const stage = $("#reelstage"), cites = $("#reelcites");
     if (!stage) return;
+    const gone = "The meeting this reel was cut from isn’t in this pressing of "
+      + "the record. It may have been curated away, or pressed under a different id.";
     const st = decodeReel(location.search);
-    if (st.v && st.v !== REEL_V) return reelMessage(cites,
+    if (st.v && !REEL_VS.includes(st.v)) return reelMessage(cites,
       "This reel was shared from a newer version of the record. Update, or open "
       + "the meeting it came from to read the moments in place.");
-    if (!st.pid || !st.clips.length) return reelMessage(cites,
+    if (!st.clips.length) return reelMessage(cites,
       `This link doesn’t carry a reel. Open <a href="${BASE}/">the record</a> to `
       + "read a meeting, then tick its moments into a reel.");
-    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(st.pid)}.json`);
-    if (!m) return reelMessage(cites,
-      "The meeting this reel was cut from isn’t in this pressing of the record. "
-      + "It may have been curated away, or pressed under a different id.");
-    const meta = { pid: st.pid, title: m.title || "", town: m.town || "",
-                   body: m.body || "", date: m.date || "",
-                   video_id: m.video_id || "", url: m.url || "",
-                   duration: +m.duration || 0 };
-    // enrich each clip with the nearest moment's quote + kind for display
+    // a reel can span meetings (specs/20 §7.9 P2-B): fetch each one it touches,
+    // once, and enrich every clip from ITS OWN meeting's moments plane.
+    const pids = reelPids(st.clips);
+    const got = await Promise.all(pids.map(async pid =>
+      [pid, await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`)]));
+    const mby = {}; for (const [pid, m] of got) if (m) mby[pid] = m;
     const clips = st.clips.map(c => {
+      const m = mby[c.pid]; if (!m) return null;   // a clip whose meeting is gone drops out
       const mo = nearestMoment(m.moments || [], c.start);
-      return { start: c.start, end: c.end, t: mo ? r1(mo.t) : c.start,
-               kind: mo ? mo.kind : "moment", quote: mo ? mo.quote : "" };
-    });
-    document.title = `${meta.title} — a reel · publicrecord.studio`;
-    buildViewer(stage, cites, meta, clips, m);
+      return { pid: c.pid, start: c.start, end: c.end,
+               t: mo ? r1(mo.t) : c.start, kind: mo ? mo.kind : "moment",
+               quote: mo ? mo.quote : "", video_id: m.video_id || "",
+               mtitle: m.title || "", body: m.body || "", town: m.town || "",
+               date: m.date || "" };
+    }).filter(Boolean);
+    if (!clips.length) return reelMessage(cites, gone);
+    const nmeet = reelPids(clips).length;
+    const first = mby[clips[0].pid];
+    document.title = (nmeet > 1 ? `A reel across ${nmeet} meetings`
+                                : `${first.title || "A reel"} — a reel`)
+      + ` · publicrecord.studio`;
+    buildViewer(stage, cites, clips, mby, nmeet > 1);
   }
   function nearestMoment(moments, t) {
     // a shared clip's start is the moment's padded window start, so match the
@@ -969,11 +1072,16 @@
     }
     return best;
   }
-  function buildViewer(stage, cites, meta, clips, m) {
-    const thumb = m.thumb || "";
-    if (meta.video_id) {
+  function buildViewer(stage, cites, clips, mby, multi) {
+    const first = mby[clips[0].pid] || {};
+    // the facade shows the first clip that actually HAS a tape — a leading
+    // audio-only meeting must not blank the player for the clips that can play
+    const firstPlayable = clips.find(c => c.video_id) || clips[0];
+    const v0 = firstPlayable.video_id || "";
+    const thumb = (mby[firstPlayable.pid] || {}).thumb || "";
+    if (v0) {
       stage.innerHTML =
-        `<div class="player facade" data-video="${esc(meta.video_id)}">`
+        `<div class="player facade" data-video="${esc(v0)}">`
         + (thumb ? `<img src="${esc(thumb)}" alt="" class="pfacade-img">` : "")
         + `<button class="playbtn" type="button" aria-label="Play the reel">▶</button>`
         + `<span class="phint">tap to play the reel · ${clips.length} clip${clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(clips))} · nothing plays until you do</span></div>`
@@ -985,51 +1093,89 @@
         + 'meeting’s tape lives at the station — the reel below is its citations.'
         + '</p></div>';
     }
-    REELPLAY = { clips, i: 0, active: false, armed: false, now: $("#reelnow") };
+    REELPLAY = { clips, i: 0, active: false, armed: false, vid: v0, now: $("#reelnow") };
+    const nmeet = reelPids(clips).length;
     const head = `<div class="sectionhead"><span class="kicker">the reel — `
-      + `${clips.length} moment${clips.length > 1 ? "s" : ""} from `
-      + `<a href="${BASE}/m/${esc(meta.pid)}">${esc(meta.title)}</a>, in order · `
-      + `${hms(reelRuntime(clips))}</span></div>`;
-    const rows = clips.map((c, i) => `<a class="reelcite" data-i="${i}" href="${BASE}/m/${esc(meta.pid)}#t${Math.floor(c.t != null ? c.t : c.start)}">
+      + `${clips.length} moment${clips.length > 1 ? "s" : ""} `
+      + (multi ? `across ${nmeet} meetings`
+               : `from <a href="${BASE}/m/${esc(first.pid || clips[0].pid)}">${esc(first.title || "")}</a>`)
+      + `, in order · ${hms(reelRuntime(clips))}</span></div>`;
+    // each cite deep-links its OWN meeting; a cross-meeting reel names it too
+    const rows = clips.map((c, i) => `<a class="reelcite" data-i="${i}" href="${BASE}/m/${esc(c.pid)}#t${Math.floor(c.t != null ? c.t : c.start)}">
         <span class="rc-ord">${i + 1}</span>
-        <span class="rc-body"><span class="rc-quote">${esc(c.quote || "(moment)")}</span>
+        <span class="rc-body">${multi ? `<span class="rc-from">${esc(c.mtitle || c.pid)}</span>` : ""}<span class="rc-quote">${esc(c.quote || "(moment)")}</span>
           <span class="rc-meta"><span class="rt-kind">${esc(c.kind)}</span>
             <span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span></span>
         </span></a>`).join("");
-    const where = [meta.body, meta.town, meta.date].filter(Boolean).join(" · ");
+    // a single-meeting reel keeps its meta (for reel.json + the cite head + the
+    // open-meeting link); a cross-meeting one has no single meeting to open.
+    const vmeta = multi ? { pid: "", title: "", town: "", body: "", date: "" }
+      : { pid: first.pid || clips[0].pid, title: first.title || "",
+          town: first.town || "", body: first.body || "", date: first.date || "",
+          video_id: v0, url: first.url || "", duration: +first.duration || 0 };
+    const where = multi ? "" : [vmeta.body, vmeta.town, vmeta.date].filter(Boolean).join(" · ");
     cites.innerHTML = head + `<div class="reelcitelist">${rows}</div>`
       + (where ? `<p class="rc-where">${esc(where)}</p>` : "")
       + `<div class="rt-btns">
           <button class="btn" type="button" data-rv="cite">⧉ Copy cite sheet</button>
-          <button class="btn" type="button" data-rv="json">⬇ reel.json</button>
-          <a class="btn" href="${BASE}/m/${esc(meta.pid)}">open the meeting →</a></div>
+          ${multi ? "" : '<button class="btn" type="button" data-rv="json">⬇ reel.json</button>'}
+          ${multi ? "" : `<a class="btn" href="${BASE}/m/${esc(vmeta.pid)}">open the meeting →</a>`}</div>
         <p class="hint">This reel lives in the link you followed — no account, no
-          server kept it. <b>Rendering it as a video needs the desk</b> — the
-          reel.json opens in Highlighter.</p>`;
+          server kept it. ${multi
+            ? "<b>This reel spans meetings</b> — it plays and cites here; rendering one video across meetings is a desk step still to come."
+            : "<b>Rendering it as a video needs the desk</b> — the reel.json opens in Highlighter."}</p>`;
     $$("[data-rv]", cites).forEach(b => b.onclick = () =>
-      b.dataset.rv === "cite" ? copyText(citeSheet(meta, clips), "cite sheet copied")
-                              : downloadReel(meta, clips));
-    // clicking a cite while the reel plays jumps to that clip; otherwise the
-    // deep link into the meeting is followed (the JS-off behaviour too)
+      b.dataset.rv === "cite" ? copyText(citeSheet(vmeta, clips), "cite sheet copied")
+                              : downloadReel(vmeta, clips));
+    // clicking a cite while the reel plays jumps to that clip (switching the tape
+    // when the clip is from another meeting); a tape-less clip just follows its
+    // deep link, and so does any click when the reel isn't playing
     $$(".reelcite", cites).forEach(a => a.addEventListener("click", ev => {
-      if (!REELPLAY.active) return;
+      const i = +a.dataset.i, c = REELPLAY.clips[i];
+      if (!REELPLAY.active || !c.video_id) return;
       ev.preventDefault();
-      REELPLAY.i = +a.dataset.i; REELPLAY.armed = false;
-      ytSeek(REELPLAY.clips[REELPLAY.i].start); reelShow();
+      REELPLAY.i = i; REELPLAY.armed = false;
+      reelSeek(c); reelShow();
     }));
   }
   function startReel(clips) {
-    REELPLAY.i = 0; REELPLAY.active = true; REELPLAY.armed = false;
+    // begin at the first clip that has a tape — a reel that opens on an
+    // audio-only meeting still plays its later, playable clips
+    let i = 0; while (i < clips.length && !clips[i].video_id) i++;
+    if (i >= clips.length) return;
+    REELPLAY.i = i; REELPLAY.active = true; REELPLAY.armed = false;
+    REELPLAY.vid = clips[i].video_id;
     const f = $(".player.facade");
-    if (f) loadTape(f.dataset.video, clips[0].start); else ytSeek(clips[0].start);
+    if (f) loadTape(f.dataset.video, clips[i].start); else ytSeek(clips[i].start);
     reelShow();
+  }
+  /* seek within the current tape, or — when the clip is from another meeting —
+     load THAT meeting's tape at the clip start. Never fall back to the tape
+     already loaded: a clip must play its own meeting's footage or none. */
+  function reelSeek(c) {
+    const vid = c.video_id;
+    if (!vid) return;                          // a tape-less clip is read, not played
+    if (vid === REELPLAY.vid) { ytSeek(c.start); return; }
+    // a cross-meeting clip: load its tape. The swapped-out video keeps posting
+    // stale times for a beat — they belong to another timeline and could arm or
+    // skip the new clip — so settle briefly, then let the armed gate re-arm.
+    REELPLAY.vid = vid;
+    if (typeof YT !== "undefined" && YT.win && YT.ready) {
+      REELPLAY.settling = true;
+      if (typeof setTimeout === "function")
+        setTimeout(() => { if (REELPLAY) REELPLAY.settling = false; }, 500);
+      ytSend("cmd", "loadVideoById", [{ videoId: vid, startSeconds: c.start }]);
+    } else {
+      REELPLAY.pending = { vid, start: c.start };   // player not up yet → apply on onReady
+    }
   }
   /* the seek engine, clip to clip. Clips play in reel order, not chronological,
      so after a clip ends the next start may be *earlier* in the tape — the
      `armed` gate waits for the seek to land near the new clip's start before it
-     watches that clip's end, so a stale time report can't skip a clip. */
+     watches that clip's end, so a stale time report can't skip a clip. While a
+     cross-meeting tape switch settles, reports are ignored entirely. */
   function reelAdvance(t) {
-    if (!REELPLAY || !REELPLAY.active) return;
+    if (!REELPLAY || !REELPLAY.active || REELPLAY.settling) return;
     const c = REELPLAY.clips[REELPLAY.i]; if (!c) return;
     if (!REELPLAY.armed) {
       // arm only on a report that lands inside the clip and BEFORE its end
@@ -1041,8 +1187,11 @@
     }
     if (t >= c.end - 0.12) {
       REELPLAY.armed = false;
-      if (REELPLAY.i < REELPLAY.clips.length - 1) {
-        REELPLAY.i++; ytSeek(REELPLAY.clips[REELPLAY.i].start); reelShow();
+      // the next clip that actually has a tape (a cite-only clip is read, not played)
+      let n = REELPLAY.i + 1;
+      while (n < REELPLAY.clips.length && !REELPLAY.clips[n].video_id) n++;
+      if (n < REELPLAY.clips.length) {
+        REELPLAY.i = n; reelSeek(REELPLAY.clips[n]); reelShow();
       } else {
         REELPLAY.active = false; ytSend("cmd", "pauseVideo", []); reelShow(true);
       }
@@ -1051,13 +1200,16 @@
   function reelShow(done) {
     if (!REELPLAY) return;
     const now = REELPLAY.now, c = REELPLAY.clips[REELPLAY.i];
+    // when the reel spans meetings, name each clip's meeting as it plays
+    const from = (c && c.mtitle && reelPids(REELPLAY.clips).length > 1)
+      ? ` <span class="rn-from">${esc(c.mtitle)}</span>` : "";
     if (now) {
       now.hidden = false;
       now.innerHTML = (done || !c)
         ? `<b>reel complete</b> — ${REELPLAY.clips.length} clip${REELPLAY.clips.length > 1 ? "s" : ""} played`
         : `<span class="rn-ord">clip ${REELPLAY.i + 1} of ${REELPLAY.clips.length}</span>`
           + `<span class="ts">${hms(c.start)}</span> `
-          + `<span class="rn-quote">${esc(c.quote || c.kind || "")}</span>`;
+          + `<span class="rn-quote">${esc(c.quote || c.kind || "")}</span>${from}`;
     }
     $$(".reelcite").forEach((a, i) =>
       a.classList.toggle("on", REELPLAY.active && i === REELPLAY.i));
