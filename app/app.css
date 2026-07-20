@@ -714,3 +714,22 @@ table.twin a{color:var(--accent)}
   .transcript{border:0;padding:0}
   .seg .ts{color:#000}
 }
+
+/* the kits — Publisher's reading half (specs/20 §6, §7.9 P2). Quiet like the
+   rest of the record: neutrals + deep green, no new palette. Clips reuse the
+   moment card; only the index grid and the copy blocks are new. */
+.press .eyebrow{margin:var(--space-3) 0 var(--space-1)}
+.kitgrid{display:grid;gap:var(--space-3);
+  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));margin:var(--space-4) 0}
+/* kit clip cards carry no reel tick — reclaim the room the meeting page holds */
+.press.kit .mo-card .mo-head{padding-right:0}
+.press.kit .kittitles{list-style:none;margin:var(--space-2) 0;padding:0;
+  display:flex;flex-direction:column;gap:var(--space-2)}
+.press.kit .kittitles li{font-family:var(--font-mono);font-size:var(--text-base);
+  color:var(--text-primary);padding:var(--space-2) var(--space-3);
+  background:var(--surface-card);border:var(--border-w) solid var(--border-hairline);
+  border-radius:var(--radius-sm)}
+.press.kit .kitdesc{max-width:70ch;color:var(--text-secondary);
+  font-size:var(--text-base);line-height:var(--leading-body);
+  padding:var(--space-3) var(--space-4);background:var(--surface-card);
+  border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm)}
