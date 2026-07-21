@@ -75,6 +75,7 @@
   const path = location.pathname.replace(/\/index\.html$/, "").replace(/\/$/, "") || "/app";
   document.addEventListener("DOMContentLoaded", () => {
     initScope();
+    initStudio();
     if (/\/app\/m\//.test(path)) meeting();
     else if (/\/app\/r$/.test(path)) reel();
     else if (/\/app\/s$/.test(path)) search();
@@ -99,6 +100,227 @@
       if (q) { q.focus(); q.select(); } else location.href = `${BASE}/s`;
     });
   }
+
+  /* ================= THE STUDIO — the three-mode footprint (specs/21 P0) ======
+     publicrecord ships as a reader; specs/21 lets that reader become an editor.
+     The whole studio is built HERE, by script, and never baked — so a page with
+     this file removed is exactly the specs/20 paper. "Paper mode" is not a
+     feature that hides the studio; it is the honest floor the studio is added on
+     top of. Three modes, the reader's to choose:
+
+       preview — the default. A compact, quiet card: you can see that you can
+                 edit, without the cockpit. The resident's reading is undisturbed.
+       studio  — the editor. A full left sidebar, and the one place
+                 publicrecord's volume goes up (the ratified accents, §6.1). The
+                 paper becomes the canvas beside it.
+       paper   — the studio recedes to a single tab; just the quiet reader. Never
+                 louder than specs/20, because it *is* specs/20.
+
+     The choice is localStorage and nothing else — no account, no cookie, no
+     server ever learns which mode a reader prefers, the same rule the town
+     scope keeps. JavaScript off, or a screen too narrow to hold both, and the
+     reader gets paper: the studio is enhancement, and enhancement that cannot
+     land leaves the reading whole. */
+
+  const MODE_KEY = "cz-studio-mode";
+  const RAIL_KEY = "cz-studio-rail";     // the sidebar collapsed to a rail
+  const MODES = ["preview", "studio", "paper"];
+  const readMode = () => { try {
+    const m = localStorage.getItem(MODE_KEY);
+    return MODES.includes(m) ? m : "preview";
+  } catch { return "preview"; } };
+  const writeMode = m => { try { localStorage.setItem(MODE_KEY, m); }
+    catch { /* private mode: the choice holds for this visit */ } };
+  const readRail = () => { try { return localStorage.getItem(RAIL_KEY) === "1"; } catch { return false; } };
+  const writeRail = v => { try {
+    v ? localStorage.setItem(RAIL_KEY, "1") : localStorage.removeItem(RAIL_KEY);
+  } catch { /* private mode */ } };
+
+  /* The mode class rides on <html>, set as early as this file can act (during
+     the initial synchronous run, before DOMContentLoaded) so a preview/studio
+     reader pays the smallest possible flash of un-shifted paper. The class is
+     the ONLY hook the stylesheet needs: the studio accents live under
+     html.cz-m-studio and simply do not exist in any other mode, so nothing loud
+     can leak into the paper. */
+  function markMode(m) {
+    const el = document.documentElement;
+    MODES.forEach(x => el.classList.toggle("cz-m-" + x, x === m));
+    el.classList.toggle("cz-rail", m === "studio" && readRail());
+  }
+
+  const modeBtn = (m, label, title) =>
+    `<button type="button" class="cz-mode" data-mode="${m}" title="${esc(title)}" aria-pressed="false">${esc(label)}</button>`;
+  /* Three presentations, one <aside>, chosen by the mode class on <html>:
+     · paper   — a quiet edge tab (◐ studio), so the reader who hid the studio
+                 can bring it back; it blocks nothing.
+     · preview — a compact, non-blocking pill in the corner: an invitation to
+                 edit + the reel count, and a way to dismiss to paper. Never a
+                 card floating over the reading (the resident's page stays fully
+                 clickable, on the phone and the desktop both).
+     · studio  — the full sidebar, with the mode control, the collapse handle,
+                 and the reel + paper panels. */
+  function studioMarkup() {
+    const modes = `<div class="cz-modes" role="group" aria-label="how much studio to show">`
+      + modeBtn("preview", "preview", "a compact preview")
+      + modeBtn("studio", "studio", "the full editor")
+      + modeBtn("paper", "paper", "just the paper — the quiet reader")
+      + `</div>`;
+    return `<button type="button" class="cz-tab" title="open the studio">◐ studio</button>
+      <div class="cz-pill">
+        <button type="button" class="cz-enter">✎ Enter the studio →</button>
+        <a class="cz-pill-reel" hidden></a>
+        <button type="button" class="cz-hide" title="just the paper"
+                aria-label="hide the studio — just the paper">✕</button>
+      </div>
+      <div class="cz-panel">
+        <div class="cz-head">
+          <span class="cz-brand">✎ the studio</span>
+          ${modes}
+          <button type="button" class="cz-rail-btn" title="collapse the studio"
+                  aria-label="collapse the studio">‹</button>
+        </div>
+        <div class="cz-full">
+          <section class="cz-block">
+            <span class="cz-tag">your reel</span>
+            <div class="cz-reelbody"></div>
+          </section>
+          <section class="cz-block">
+            <span class="cz-tag">your paper</span>
+            <p class="cz-hint">Assemble stories, reels, charts and notes into
+              your own front page — arrange it, title it, share it as your
+              paper. Arriving next.</p>
+          </section>
+          <p class="cz-cov">no account · no server · this stays in your browser</p>
+        </div>
+      </div>`;
+  }
+
+  let STUDIO = null;
+  function initStudio() {
+    if (STUDIO) return;
+    const aside = document.createElement("aside");
+    aside.className = "cz-studio";
+    aside.id = "cz-studio";
+    aside.setAttribute("aria-label", "the studio — edit your own paper");
+    aside.innerHTML = studioMarkup();
+    // FIRST child of <body>, not last: position:fixed makes its DOM order purely
+    // reading/tab order, and in studio mode the sidebar sits visually first (on
+    // the left) — so a keyboard reaches its controls before the transcript, not
+    // after the footer. In preview/paper it is a single corner button, a
+    // skip-link-like first stop that costs nothing.
+    document.body.insertBefore(aside, document.body.firstChild);
+    STUDIO = aside;
+    wireStudio();
+    updateModeButtons();
+    refreshReelSummary();
+    // another tab that ticks a moment (or clears the reel) writes the shared key;
+    // reflect it here without a reload. When THIS page is also composing, the
+    // tray and ticks must move together with the summary, or the two disagree.
+    window.addEventListener("storage", e => {
+      if (e && e.key !== REEL_KEY && e.key !== null) return;
+      if (CREEL) { CREEL.clips = readReel(REEL_KEY); buildTray(); paintTicks(); }
+      refreshReelSummary();
+    });
+  }
+
+  function wireStudio() {
+    if (!STUDIO) return;
+    $$(".cz-mode", STUDIO).forEach(b => b.onclick = () => setMode(b.dataset.mode));
+    // the explicit "enter" always opens the full sidebar, even for a reader whose
+    // last studio visit left it collapsed to a rail
+    const enter = $(".cz-enter", STUDIO);
+    if (enter) enter.onclick = () => { writeRail(false); setMode("studio"); };
+    const hide = $(".cz-hide", STUDIO); if (hide) hide.onclick = () => setMode("paper");
+    const tab = $(".cz-tab", STUDIO); if (tab) tab.onclick = () => setMode("preview");
+    const rail = $(".cz-rail-btn", STUDIO); if (rail) rail.onclick = () => toggleRail();
+    STUDIO.addEventListener("click", e => {
+      const b = e.target.closest("[data-cz]"); if (!b) return;
+      const act = b.dataset.cz;
+      if (act === "reelcopy") { const c = readReel(REEL_KEY);
+        if (c.length) copyText(reelShareURL(c), "share link copied"); }
+      else if (act === "reelclear") clearReel();
+    });
+  }
+
+  function setMode(m) {
+    if (!MODES.includes(m)) m = "preview";
+    writeMode(m); markMode(m); updateModeButtons();
+    // keyboard focus must not fall to <body> when the control the reader was on
+    // is display:none'd by the switch — land it on a control the new mode shows.
+    focusModeControl(m);
+    // moving into paper is the reader's exit from the studio; moving out restores
+    // it. Nothing here touches the paper's own DOM — the shift is a class on
+    // <html>, and paper mode carries none of it.
+    toast(m === "studio" ? "in the studio — edit your paper"
+        : m === "paper" ? "paper — just the record"
+        : "preview — the studio is a tap away");
+  }
+  function focusModeControl(m) {
+    if (!STUDIO) return;
+    const el = m === "paper" ? $(".cz-tab", STUDIO)
+      : m === "preview" ? $(".cz-enter", STUDIO)
+      : ($('.cz-mode[data-mode="studio"]', STUDIO));
+    if (el && typeof el.focus === "function") el.focus();
+  }
+  function toggleRail() {
+    const v = !readRail(); writeRail(v);
+    document.documentElement.classList.toggle("cz-rail", readMode() === "studio" && v);
+    updateModeButtons();
+  }
+  function updateModeButtons() {
+    const m = readMode();
+    $$(".cz-mode", STUDIO || document).forEach(b =>
+      b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"));
+    // the collapse handle's glyph AND its label track the stored state, so a
+    // page that loads with the sidebar already collapsed reads "expand", not the
+    // stale "collapse" baked into the markup
+    const b = $(".cz-rail-btn", STUDIO);
+    if (b) { const railed = readRail(); b.textContent = railed ? "›" : "‹";
+      b.title = railed ? "expand the studio" : "collapse the studio";
+      b.setAttribute("aria-label", b.title); }
+  }
+
+  /* The one make-loop that exists, surfaced (not rebuilt): the global reel the
+     composer fills as you tick moments across meetings. The studio reads the
+     same `cz-reel` key the meeting page writes, and shows it as a count on the
+     preview pill and a panel in studio — a play link, a share link, a clear. */
+  function refreshReelSummary() {
+    if (!STUDIO) return;
+    const clips = readReel(REEL_KEY);
+    const n = clips.length;
+    const body = $(".cz-reelbody", STUDIO), mini = $(".cz-pill-reel", STUDIO);
+    if (!n) {
+      if (body) body.innerHTML = `<p class="cz-hint">No clips yet. Open a
+        meeting, tick its moments, and they gather here as a reel — across
+        meetings if you like.</p>`;
+      if (mini) { mini.hidden = true; mini.removeAttribute("href"); mini.textContent = ""; }
+      return;
+    }
+    const url = reelShareURL(clips), meets = reelPids(clips).length;
+    const span = meets > 1 ? ` · ${meets} meetings` : "";
+    if (body) body.innerHTML =
+        `<p class="cz-reeln"><b>${n}</b> clip${n > 1 ? "s" : ""} · ${hms(reelRuntime(clips))}${span}</p>`
+      + `<div class="cz-reelacts">`
+      +   `<a class="btn primary" href="${esc(url)}">▶ play the reel</a>`
+      +   `<button type="button" class="btn" data-cz="reelcopy">⧉ share link</button>`
+      +   `<button type="button" class="btn" data-cz="reelclear">clear</button></div>`
+      + `<p class="cz-hint">The reel lives in this browser and its link — no
+         account, no server.</p>`;
+    if (mini) { mini.hidden = false; mini.href = url;
+      mini.textContent = `▶ ${n} clip${n > 1 ? "s" : ""} · ${hms(reelRuntime(clips))}`; }
+  }
+  function clearReel() {
+    try { localStorage.setItem(REEL_KEY, "[]"); } catch { /* private mode */ }
+    if (CREEL) { CREEL.clips = []; buildTray(); paintTicks(); }
+    refreshReelSummary(); toast("reel cleared");
+  }
+
+  // set the mode class as early as this file can act — during its initial
+  // synchronous run, before DOMContentLoaded. This script is the last thing in
+  // <body>, so a studio reader may still see one reflow as the paper shifts; a
+  // render-blocking head script could erase it, at a cost to every page's first
+  // paint, and P0 judges the one-time shift not worth that.
+  markMode(readMode());
 
   /* ================= SCOPE: the town, and the body ==================
      specs/17 §8. The reader picks a town once and every page obeys it; a
@@ -810,6 +1032,10 @@
     wireTicks();
     buildTray();
     paintTicks();
+    // loadReel() may have just migrated legacy per-meeting drafts into the global
+    // reel; the studio summary was painted before this meeting hydrated, so bring
+    // it in line with what the tray now holds.
+    refreshReelSummary();
   }
   // a clip's storage key, independent of the meeting on screen (unlike clipId,
   // which reads CREEL): a clip already carries its own pid.
@@ -849,7 +1075,9 @@
   } catch { return []; } }
   const saveReel = () => { try {
     localStorage.setItem(REEL_KEY, JSON.stringify(CREEL.clips));
-  } catch { /* private mode: the tray still works for this visit */ } };
+  } catch { /* private mode: the tray still works for this visit */ }
+    refreshReelSummary();   // keep the studio's reel count live as you tick
+  };
 
   function wireTicks() {
     $$(".mo-card").forEach(card => {
@@ -1589,10 +1817,12 @@
   /* ---- toast ---- */
   let toEl;
   function toast(msg) {
-    if (!toEl) { toEl = document.createElement("div"); toEl.className = "citebar";
-      toEl.style.cssText = "position:fixed;left:50%;bottom:22px;transform:translateX(-50%);display:none;background:var(--surface-inverse);color:var(--text-inverse);padding:8px 14px";
+    // position lives in the stylesheet (.cz-toast), not inline, so studio mode
+    // can re-centre it over the shifted paper — an inline left:50% would beat the
+    // rule. Only visibility is toggled here.
+    if (!toEl) { toEl = document.createElement("div"); toEl.className = "cz-toast";
       document.body.appendChild(toEl); }
-    toEl.textContent = msg; toEl.style.display = "block";
-    clearTimeout(toEl._t); toEl._t = setTimeout(() => toEl.style.display = "none", 2600);
+    toEl.textContent = msg; toEl.classList.add("on");
+    clearTimeout(toEl._t); toEl._t = setTimeout(() => toEl.classList.remove("on"), 2600);
   }
 })();

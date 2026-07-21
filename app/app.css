@@ -738,3 +738,169 @@ table.twin a{color:var(--accent)}
   font-size:var(--text-base);line-height:var(--leading-body);
   padding:var(--space-3) var(--space-4);background:var(--surface-card);
   border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm)}
+
+/* ================= the studio — the three-mode footprint (specs/21 P0) =========
+   Built entirely by app.js; with these rules removed the page is still the paper.
+   They divide cleanly into layout (the shift that makes room for the sidebar) and
+   the ratified palette lift (§6.1). The lift is scoped to html.cz-m-studio by
+   construction: the purple + bright-green accents are declared on that class and
+   nowhere else, so preview, paper, and the shared masthead/folio/footer never
+   see them, and a page with JS off never enters a mode at all.
+
+   Two purple literals, both studio-scoped and both pinned by a guard test
+   (tests/test_web_bake.py): #a855f7 (civicmedia's --pop-purple) for surfaces and
+   borders, and #7c3aed (violet-600) for text and text-bearing fills — the darker
+   shade clears WCAG AA 4.5:1 where the lighter one would not. No fuchsia, ever.
+   Flat vector throughout — the quiet properties take no drop shadow (branding.md),
+   and neither does the studio. */
+
+/* --- the accents: declared ONLY in studio mode, so they cannot leak (§6.1) --- */
+html.cz-m-studio{
+  --studio-accent:#a855f7;                 /* --pop-purple — surfaces + borders (non-text) */
+  --studio-accent-text:#7c3aed;            /* violet-600 — text + text fills, AA 4.5:1+ */
+  --studio-accent-2:#22c55e;               /* --green-bright — a non-text "reel" accent */
+  --studio-surface:color-mix(in srgb, var(--studio-accent) 5%, var(--surface-card));
+  --sw:min(320px, 32vw);                   /* the sidebar's width == the paper shift */
+}
+html.cz-m-studio.cz-rail{--sw:44px}
+
+/* --- the paper shift: a class on <html>, a padding on <body>. The paper's own
+   DOM never moves; preview and paper add nothing at all. --- */
+html.cz-m-studio body{padding-left:var(--sw)}
+html.cz-m-studio .mini-header{left:var(--sw)}
+html.cz-m-studio .updatebar{left:calc(50% + var(--sw) / 2)}
+
+/* --- the studio element: one <aside>, three presentations --- */
+.cz-studio,.cz-studio *{box-sizing:border-box}
+.cz-studio{position:fixed;z-index:36;left:0;bottom:0;font-family:var(--font-sans)}
+
+/* studio: the full left sidebar */
+html.cz-m-studio .cz-studio{top:0;bottom:0;width:var(--sw);overflow:auto;
+  background:var(--studio-surface);
+  border-right:var(--border-w-strong) solid var(--studio-accent);
+  padding:var(--space-4)}
+html.cz-m-studio.cz-rail .cz-studio{padding:var(--space-3) 0;overflow:visible}
+
+/* preview: a compact, non-blocking pill in the corner — never a card over the
+   reading (the resident's page stays fully clickable, phone and desktop both) */
+html.cz-m-preview .cz-studio{left:var(--space-4);bottom:var(--space-5);width:auto;
+  background:none;border:0;padding:0;max-width:calc(100vw - 2 * var(--space-4))}
+
+/* paper: nothing but a tab, so paper mode is never a trap */
+html.cz-m-paper .cz-studio{left:0;bottom:var(--space-6);width:auto;
+  background:none;border:0;padding:0}
+
+/* the preview pill and the paper tab are fixed to the viewport corner; reserve
+   room at the foot of the page so the footer's own links never sit under them
+   when the reader scrolls all the way down (the paper's DOM is untouched — this
+   is a studio-mode padding that JS-off never applies) */
+html.cz-m-preview body,html.cz-m-paper body{padding-bottom:calc(var(--space-8) + var(--space-3))}
+
+/* which parts show, by mode */
+.cz-tab,.cz-pill,.cz-panel{display:none}
+html.cz-m-paper .cz-tab{display:inline-flex}
+html.cz-m-preview .cz-pill{display:inline-flex}
+html.cz-m-studio .cz-panel{display:block}
+html.cz-m-studio.cz-rail .cz-brand,
+html.cz-m-studio.cz-rail .cz-full,
+html.cz-m-studio.cz-rail .cz-modes{display:none}
+
+/* keyboard-visible focus — the same emerald ring the paper's global rule uses.
+   --focus-ring is a brand token that the pressed :root does not emit, so fall
+   back to --state (green-emerald), which it does; without the fallback these
+   more-specific selectors would resolve to outline:none and silently override
+   the working global :focus-visible ring. */
+.cz-mode:focus-visible,.cz-enter:focus-visible,.cz-hide:focus-visible,
+.cz-tab:focus-visible,.cz-rail-btn:focus-visible,.cz-pill-reel:focus-visible,
+.cz-reelacts .btn:focus-visible{
+  outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
+
+/* --- preview: the pill --- */
+.cz-pill{align-items:stretch;background:var(--surface-card);
+  border:var(--border-w-strong) solid var(--accent);border-radius:var(--radius-sm);
+  overflow:hidden;max-width:100%}
+.cz-enter{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  letter-spacing:.02em;background:none;border:0;color:var(--accent);
+  padding:9px 11px;cursor:pointer;white-space:nowrap}
+.cz-enter:hover{background:var(--accent);color:var(--text-inverse)}
+.cz-pill-reel{font:var(--weight-medium) var(--text-xs)/1 var(--font-mono);
+  color:var(--text-secondary);text-decoration:none;padding:9px 10px;white-space:nowrap;
+  border-left:var(--border-w) solid var(--border-hairline);display:flex;align-items:center}
+/* display:flex would defeat the UA [hidden] rule, so the empty-reel segment must
+   be hidden explicitly (the same guard the other toggled elements carry) */
+.cz-pill-reel[hidden]{display:none}
+.cz-pill-reel:hover{color:var(--accent)}
+.cz-hide{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  background:none;border:0;border-left:var(--border-w) solid var(--border-hairline);
+  color:var(--text-secondary);padding:9px 10px;cursor:pointer}
+.cz-hide:hover{color:var(--text-primary)}
+
+/* --- the head: brand + the segmented mode control + the collapse handle --- */
+.cz-head{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;
+  margin-bottom:var(--space-3)}
+html.cz-m-studio.cz-rail .cz-head{margin:0;justify-content:center}
+.cz-brand{font:var(--weight-bold) var(--text-sm)/1 var(--font-mono);
+  color:var(--studio-accent-text, var(--accent));letter-spacing:var(--tracking-label)}
+.cz-modes{display:inline-flex;border:var(--border-w) solid var(--border-strong);
+  border-radius:var(--radius-sm);overflow:hidden}
+.cz-mode{font:var(--weight-medium) var(--text-xs)/1 var(--font-mono);
+  padding:6px 9px;background:var(--surface-card);color:var(--text-secondary);
+  border:0;cursor:pointer}
+.cz-mode+.cz-mode{border-left:var(--border-w) solid var(--border-hairline)}
+.cz-mode:hover{color:var(--text-primary)}
+.cz-mode[aria-pressed="true"]{background:var(--studio-accent-text, var(--accent));
+  color:var(--text-inverse)}
+.cz-rail-btn{margin-left:auto;font:var(--weight-bold) var(--text-md)/1 var(--font-mono);
+  background:none;border:0;color:var(--text-secondary);cursor:pointer;padding:2px 6px}
+html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
+.cz-rail-btn:hover{color:var(--studio-accent-text, var(--accent))}
+
+/* --- studio full --- */
+.cz-block{margin-bottom:var(--space-5)}
+.cz-tag{display:block;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  letter-spacing:var(--tracking-label);text-transform:uppercase;
+  color:var(--text-secondary);margin-bottom:var(--space-2)}
+.cz-hint{font-size:var(--text-sm);color:var(--text-secondary);
+  line-height:var(--leading-body);margin:0}
+.cz-reeln{font:var(--weight-bold) var(--text-md)/1.2 var(--font-mono);
+  color:var(--text-primary);margin:0 0 var(--space-2);
+  border-left:3px solid var(--studio-accent-2);padding-left:var(--space-2)}
+.cz-reeln b{color:var(--accent)}          /* deep green — high contrast, "in the reel" */
+.cz-reelacts{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-2)}
+.cz-reelacts .btn{font-size:var(--text-xs)}
+.cz-cov{font:var(--weight-medium) var(--text-xs)/1.4 var(--font-mono);
+  color:var(--text-secondary);margin:var(--space-5) 0 0;
+  border-top:var(--border-w) solid var(--border-hairline);padding-top:var(--space-3)}
+/* the studio's own primary button carries the lift — the paper's .btn is untouched.
+   the darker violet keeps white text at AA 4.5:1 (the lighter --pop-purple would not) */
+html.cz-m-studio .cz-studio .btn.primary{background:var(--studio-accent-text);
+  border-color:var(--studio-accent-text)}
+
+/* --- the paper-mode tab (flat: the ink surface is its own separation) --- */
+.cz-tab{align-items:center;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  letter-spacing:var(--tracking-label);background:var(--surface-inverse);
+  color:var(--text-inverse);border:0;
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+  padding:9px 12px 9px 10px;cursor:pointer}
+.cz-tab:hover{padding-left:14px}
+
+/* --- the toast: position in the stylesheet, not inline, so studio mode can
+   re-centre it over the shifted paper --- */
+.cz-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:41;
+  display:none;background:var(--surface-inverse);color:var(--text-inverse);
+  padding:8px 14px;font:var(--weight-medium) var(--text-xs)/1.35 var(--font-mono);
+  border-radius:var(--radius-sm);max-width:calc(100vw - 2 * var(--space-4))}
+.cz-toast.on{display:block}
+html.cz-m-studio .cz-toast{left:calc(50% + var(--sw) / 2)}
+
+/* --- narrow screens degrade to paper: the studio never shifts the reading. In
+   studio mode it becomes an overlay drawer over the paper (specs/21 §7); preview
+   stays the same small pill, and a collapsed studio stays a slim rail. --- */
+@media (max-width:720px){
+  html.cz-m-studio body{padding-left:0}
+  html.cz-m-studio .mini-header{left:0}
+  html.cz-m-studio .updatebar{left:50%}
+  html.cz-m-studio .cz-toast{left:50%}
+  html.cz-m-studio .cz-studio{width:min(320px, 86vw)}
+  html.cz-m-studio.cz-rail .cz-studio{width:44px}
+}
