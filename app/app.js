@@ -78,6 +78,7 @@
     initStudio();
     if (/\/app\/m\//.test(path)) meeting();
     else if (/\/app\/r$/.test(path)) reel();
+    else if (/\/app\/p$/.test(path)) paper();
     else if (/\/app\/s$/.test(path)) search();
     else if (/\/app\/add$/.test(path)) addMeeting();
     else if (/\/app\/i\//.test(path)) issue();
@@ -186,9 +187,7 @@
           </section>
           <section class="cz-block">
             <span class="cz-tag">your paper</span>
-            <p class="cz-hint">Assemble stories, reels, charts and notes into
-              your own front page — arrange it, title it, share it as your
-              paper. Arriving next.</p>
+            <div class="cz-paperbody"></div>
           </section>
           <p class="cz-cov">no account · no server · this stays in your browser</p>
         </div>
@@ -213,13 +212,24 @@
     wireStudio();
     updateModeButtons();
     refreshReelSummary();
-    // another tab that ticks a moment (or clears the reel) writes the shared key;
-    // reflect it here without a reload. When THIS page is also composing, the
-    // tray and ticks must move together with the summary, or the two disagree.
+    refreshPaperSummary();
+    // another tab that ticks a moment (or edits the paper, or clears either)
+    // writes a shared key; reflect it here without a reload. When THIS page is
+    // also composing, the tray and ticks must move together with the summary,
+    // or the two disagree. A clear() fires with key === null and touches both.
     window.addEventListener("storage", e => {
-      if (e && e.key !== REEL_KEY && e.key !== null) return;
-      if (CREEL) { CREEL.clips = readReel(REEL_KEY); buildTray(); paintTicks(); }
-      refreshReelSummary();
+      const k = e && e.key;
+      if (k === REEL_KEY || k === null) {
+        if (CREEL) { CREEL.clips = readReel(REEL_KEY); buildTray(); paintTicks(); }
+        refreshReelSummary();
+        refreshPaperSummary();   // the reel add-button's count rides the tray
+      }
+      if (k === PAPER_KEY || k === null) {
+        retireShortOut();        // another tab changed the paper — the minted
+                                 // link names the old one and must not repaint
+        refreshPaperSummary();
+        schedulePaperRender();   // /app/p reading its own draft repaints too
+      }
     });
   }
 
@@ -239,6 +249,19 @@
       if (act === "reelcopy") { const c = readReel(REEL_KEY);
         if (c.length) copyText(reelShareURL(c), "share link copied"); }
       else if (act === "reelclear") clearReel();
+      // your paper (P1) — every handler here is a call into the paper section;
+      // painting and arranging stay pure localStorage, and the one server
+      // touch a paper can have (the optional short link) happens only inside
+      // paperShortLink, behind this explicit press and nowhere else.
+      else if (act === "padd") addPageToPaper();
+      else if (act === "preel") addReelToPaper();
+      else if (act === "pup" || act === "pdown" || act === "pdel")
+        movePaperBlock(+b.dataset.i, act);
+      else if (act === "plink") copyText(paperShareURL(readPaper()),
+        "paper link copied — it carries the whole paper");
+      else if (act === "pjson") downloadPaper(readPaper());
+      else if (act === "pshort") paperShortLink();
+      else if (act === "pclear") clearPaper();
     });
   }
 
@@ -312,7 +335,117 @@
   function clearReel() {
     try { localStorage.setItem(REEL_KEY, "[]"); } catch { /* private mode */ }
     if (CREEL) { CREEL.clips = []; buildTray(); paintTicks(); }
-    refreshReelSummary(); toast("reel cleared");
+    refreshReelSummary(); refreshPaperSummary(); toast("reel cleared");
+  }
+
+  /* Your paper, in the panel (specs/21 P1): the making surface. Title it, add
+     the page you are reading as a story, add your reel, arrange the blocks,
+     share the result. Painting is pure localStorage — the paper's model and
+     codec live in their own section below, and the single server touch a
+     paper can ever have (the optional short link, §6.2) is behind its button
+     there, never on this paint path. */
+  function refreshPaperSummary(focus) {
+    if (!STUDIO) return;
+    const el = $(".cz-paperbody", STUDIO); if (!el) return;
+    const p = readPaper();
+    const n = p.blocks.length;
+    const rows = p.blocks.map((b, i) => {
+      const label = b.kind === "reel"
+        ? `▶ a reel — ${b.clips.length} clip${b.clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(b.clips))}`
+        : b.story === "issue" ? `◈ ${b.name || b.slug}`
+        : `§ ${b.title || b.pid}`;
+      return `<div class="cz-prow" data-i="${i}">
+        <span class="cz-plabel" tabindex="-1" title="${esc(label)}">${esc(label)}</span>
+        <span class="cz-pacts">
+          <button type="button" class="cz-pact" data-cz="pup" data-i="${i}"
+            title="move up" aria-label="move block ${i + 1} up"${i ? "" : " disabled"}>↑</button>
+          <button type="button" class="cz-pact" data-cz="pdown" data-i="${i}"
+            title="move down" aria-label="move block ${i + 1} down"${i < n - 1 ? "" : " disabled"}>↓</button>
+          <button type="button" class="cz-pact" data-cz="pdel" data-i="${i}"
+            title="remove from your paper" aria-label="remove block ${i + 1}">✕</button>
+        </span></div>`;
+    }).join("");
+    const ref = pageStoryRef();
+    const clips = readReel(REEL_KEY);
+    const adds =
+        (ref ? `<button type="button" class="btn" data-cz="padd">＋ ${ref.story === "issue" ? "this issue" : "this meeting"}</button>` : "")
+      + (clips.length ? `<button type="button" class="btn" data-cz="preel">＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})</button>` : "");
+    const share = n || p.title ? `<div class="cz-pshare">
+        <a class="btn primary" href="${BASE}/p">📰 open your paper</a>
+        <button type="button" class="btn" data-cz="plink">⧉ copy link</button>
+        <button type="button" class="btn" data-cz="pjson">⬇ paper.json</button>
+        ${API ? `<button type="button" class="btn" data-cz="pshort">⚡ short link</button>` : ""}
+        <button type="button" class="btn" data-cz="pclear">clear</button>
+      </div>` : "";
+    // the last short link minted for THIS paper, shown as a real link — a
+    // clipboard is a privilege some browsers withhold, a link on screen is not
+    const shortOut = PAPER_SHORT && (n || p.title)
+      ? `<p class="cz-pshort-out">short link:
+           <a href="${esc(PAPER_SHORT)}">${esc(PAPER_SHORT.replace(location.origin, ""))}</a></p>`
+      : "";
+    el.innerHTML =
+        `<input class="cz-ptitle" type="text" maxlength="200"
+           placeholder="name your paper" aria-label="your paper’s title"
+           value="${esc(p.title)}">`
+      + rows
+      + (n ? "" : `<p class="cz-hint">Your paper starts empty. Add the meeting
+           or issue you’re reading, or your reel — arrange the blocks, title
+           it, share it as your own front page.</p>`)
+      + (adds ? `<div class="cz-padds">${adds}</div>` : "")
+      + share + shortOut;
+    // typing must not repaint the panel under the caret — the title saves on
+    // every keystroke and repaints nothing here (the /app/p draft render
+    // catches up on its own debounce). The one exception: crossing the
+    // empty↔titled boundary changes which controls exist, so repaint once and
+    // put the caret back exactly where it was.
+    const ti = $(".cz-ptitle", el);
+    if (ti) ti.oninput = () => {
+      const d = readPaper();
+      const had = !!(d.blocks.length || d.title);
+      d.title = ti.value.slice(0, PAPER_TITLE_MAX);
+      const has = !!(d.blocks.length || d.title);
+      if (!savePaper(d)) return;   // storage blocked — a toast per keystroke would be noise
+      retireShortOut();            // the painted link names the old title now
+      schedulePaperRender();
+      if (had !== has)
+        refreshPaperSummary({ act: "title", caret: ti.selectionStart });
+    };
+    // the storage-event and composer paths repaint with no focus arg — if the
+    // caret was in OUR title input, preserve it rather than dropping to <body>
+    if (!focus) {
+      const ae = document.activeElement;
+      if (ae && ae.classList && ae.classList.contains("cz-ptitle"))
+        focus = { act: "title", caret: ae.selectionStart };
+    }
+    if (focus) {
+      let t = focus.act === "title" ? ti
+        : focus.act === "row"
+          ? $(`.cz-prow[data-i="${focus.i}"] .cz-plabel`, el)
+        : $(`[data-cz="${focus.act}"]`
+            + (focus.i != null ? `[data-i="${focus.i}"]` : ""), el);
+      // NEVER fall back to the destructive ✕: a repeated keypress walking a
+      // block to a pole must not find delete armed under it. The opposite
+      // arrow is always enabled when a move just succeeded; a single-block
+      // paper falls to the title.
+      if (t && t.disabled) {
+        const other = focus.act === "pup" ? "pdown" : "pup";
+        t = $(`[data-cz="${other}"][data-i="${focus.i}"]`, el);
+        if (t && t.disabled) t = ti;
+      }
+      if (t) { t.focus();
+        if (focus.act === "title" && typeof focus.caret === "number"
+            && t.setSelectionRange) t.setSelectionRange(focus.caret, focus.caret);
+      }
+    }
+  }
+  /* which story the open page could contribute — /app/m/<pid> or /app/i/<slug>.
+     Pure string work on the path already parsed at the top of the file. */
+  function pageStoryRef() {
+    let m = /\/app\/m\/([\w-]+)$/.exec(path);
+    if (m) return { story: "meeting", pid: m[1] };
+    m = /\/app\/i\/([\w-]+)$/.exec(path);
+    if (m) return { story: "issue", slug: m[1] };
+    return null;
   }
 
   // set the mode class as early as this file can act — during its initial
@@ -1011,6 +1144,10 @@
     toast("reel.json downloaded — open it at the desk to render");
   }
   function copyText(txt, msg) {
+    // no clipboard at all (plain-http hosts, some embeds) must not throw —
+    // the callers' surfaces keep showing the link itself
+    if (!(navigator.clipboard && navigator.clipboard.writeText)) {
+      toast("couldn’t copy — this browser has no clipboard here"); return; }
     navigator.clipboard.writeText(txt).then(
       () => toast(msg),
       () => toast("couldn’t copy — your browser blocked the clipboard"));
@@ -1034,8 +1171,10 @@
     paintTicks();
     // loadReel() may have just migrated legacy per-meeting drafts into the global
     // reel; the studio summary was painted before this meeting hydrated, so bring
-    // it in line with what the tray now holds.
+    // it in line with what the tray now holds — the paper panel's "＋ your reel"
+    // count rides the same tray.
     refreshReelSummary();
+    refreshPaperSummary();
   }
   // a clip's storage key, independent of the meeting on screen (unlike clipId,
   // which reads CREEL): a clip already carries its own pid.
@@ -1076,7 +1215,8 @@
   const saveReel = () => { try {
     localStorage.setItem(REEL_KEY, JSON.stringify(CREEL.clips));
   } catch { /* private mode: the tray still works for this visit */ }
-    refreshReelSummary();   // keep the studio's reel count live as you tick
+    refreshReelSummary();     // keep the studio's reel count live as you tick
+    refreshPaperSummary();    // and the panel's "＋ your reel" button with it
   };
 
   function wireTicks() {
@@ -1445,6 +1585,534 @@
   function reelMessage(el, html) {
     if (el) el.innerHTML = `<p class="hint">${html}</p>`;
     const stage = $("#reelstage"); if (stage) stage.innerHTML = "";
+  }
+
+  /* ================= YOUR PAPER — the curated document (specs/21 P1) =========
+     The record's front page is the record's judgement; a paper is an
+     editor's. It is a document of blocks — stories (a meeting, an issue) and
+     reels — plus a title, and it lives the way a reel lives: in this browser
+     (the draft), in its link (the whole paper, URL-encoded), and in a file
+     (`paper.json`, the desk-openable receipt). A short link is the one
+     optional extra: a content-addressed store serves the same bytes back
+     read-only, and losing that server loses nothing but the shortness.
+
+     PART 1 — the model and the codec. Server-free by construction, and a
+     test holds it so: everything between here and the SHARING marker below
+     reads and writes localStorage, strings, and nothing else. decodeReel's
+     law governs every decoder: malformed input degrades to fewer blocks,
+     never a throw. */
+
+  const PAPER_V = "1";
+  const PAPER_VS = ["1"];
+  const PAPER_KEY = "cz-paper";        // the one draft this browser keeps
+  const PAPER_TITLE_MAX = 200;
+  const PAPER_MAX_BLOCKS = 64;
+  const PAPER_MAX_CLIPS = 100;         // per reel block — matches the store's cap
+  // a pid or an issue slug, and nothing else. The bake mints pids to 80 chars
+  // and issue slugs to 96 (web/bake.py pid()/islug()) — the cap leaves
+  // headroom and matches the store's exactly.
+  const PAPER_REF = /^[\w-]{1,128}$/;
+
+  function readPaper() {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(PAPER_KEY) || "null"); }
+    catch { p = null; }
+    return normalizePaper(p);
+  }
+  /* returns whether the draft actually held — a browser that blocks storage
+     gets told the truth by the callers, not a success toast over a void. Any
+     change also retires the last short link: it names the OLD paper. */
+  function savePaper(p) {
+    PAPER_SHORT = "";
+    try { localStorage.setItem(PAPER_KEY, JSON.stringify(p)); return true; }
+    catch { return false; }
+  }
+
+  /* total: whatever arrives — a draft, a decoded link, a stored paper, a
+     hand-edited file — leaves as a valid paper. Unknown kinds, broken refs
+     and impossible clips drop silently; nothing throws. */
+  function normalizePaper(p) {
+    const out = { title: "", blocks: [] };
+    if (!p || typeof p !== "object") return out;
+    if (typeof p.title === "string") out.title = p.title.slice(0, PAPER_TITLE_MAX);
+    for (const b of (Array.isArray(p.blocks) ? p.blocks : [])) {
+      if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
+      const nb = normalizeBlock(b);
+      if (nb) out.blocks.push(nb);
+    }
+    return out;
+  }
+  function normalizeBlock(b) {
+    if (!b || typeof b !== "object") return null;
+    if (b.kind === "story" && b.story === "meeting" && PAPER_REF.test(b.pid || "")) {
+      const nb = { kind: "story", story: "meeting", pid: b.pid };
+      for (const k of ["title", "date", "body", "town", "thumb"])
+        if (typeof b[k] === "string") nb[k] = b[k];
+      return nb;
+    }
+    if (b.kind === "story" && b.story === "issue" && PAPER_REF.test(b.slug || "")) {
+      const nb = { kind: "story", story: "issue", slug: b.slug };
+      for (const k of ["name", "first_seen", "last_seen"])
+        if (typeof b[k] === "string") nb[k] = b[k];
+      if (isFinite(b.n_meetings)) nb.n_meetings = +b.n_meetings;
+      return nb;
+    }
+    if (b.kind === "reel" && Array.isArray(b.clips)) {
+      const clips = b.clips
+        .filter(c => c && PAPER_REF.test(c.pid || "") && isFinite(c.start)
+          && c.start >= 0 && isFinite(c.end) && c.end > c.start)
+        .slice(0, PAPER_MAX_CLIPS)
+        .map(c => ({ ...c, start: r1(c.start), end: r1(c.end) }));
+      return clips.length ? { kind: "reel", clips } : null;
+    }
+    return null;
+  }
+
+  /* the traveling form: refs only. The draft carries ride-along display meta
+     (titles, quotes) so the panel paints without a fetch; the link, the store
+     and the export's block list carry none of it — a reader's page enriches
+     from the record's own planes, so a paper can never assert a title the
+     record would not. */
+  function portablePaper(p) {
+    p = normalizePaper(p);
+    return {
+      schema: "publicrecord.paper/1",
+      title: p.title,
+      blocks: p.blocks.map(b => b.kind === "reel"
+        ? { kind: "reel",
+            clips: b.clips.map(c => ({ pid: c.pid, start: r1(c.start), end: r1(c.end) })) }
+        : b.story === "issue"
+          ? { kind: "story", story: "issue", slug: b.slug }
+          : { kind: "story", story: "meeting", pid: b.pid }),
+    };
+  }
+
+  /* the link form: /app/p?v=1&t=<title>&b=<blocks>. Blocks join on ",";
+     a block is m.<pid> | i.<slug> | r.<clip>~<clip>… with clip <pid>:<s>-<e>.
+     "~" is RFC-3986-unreserved and appears in no pid, slug or time, so the
+     three separator levels never collide ("+" would decode as a space). */
+  function encodePaperQS(p) {
+    p = portablePaper(p);
+    const parts = p.blocks.map(b =>
+      b.kind === "reel"
+        ? "r." + b.clips.map(c =>
+            `${encodeURIComponent(c.pid)}:${r1(c.start)}-${r1(c.end)}`).join("~")
+      : b.story === "issue" ? "i." + encodeURIComponent(b.slug)
+      : "m." + encodeURIComponent(b.pid));
+    return `v=${PAPER_V}`
+      + (p.title ? `&t=${encodeURIComponent(p.title)}` : "")
+      + (parts.length ? `&b=${parts.join(",")}` : "");
+  }
+  function paperShareURL(p) {
+    return `${location.origin}${BASE}/p?${encodePaperQS(p)}`;
+  }
+
+  /* decode /app/p's query into {v, id, title, blocks}. Pure and total — a
+     link that lost a character in an email reads as fewer blocks, never a
+     crash. `p=` names a stored paper by content address; everything else is
+     the paper itself, carried whole. */
+  function decodePaper(search) {
+    const q = new URLSearchParams(search || "");
+    const id = (q.get("p") || "").trim();
+    const out = { v: q.get("v") || "",
+                  id: /^[0-9a-f]{16}$/.test(id) ? id : "",
+                  title: (q.get("t") || "").slice(0, PAPER_TITLE_MAX),
+                  blocks: [] };
+    for (const part of (q.get("b") || "").split(",")) {
+      if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
+      const dot = part.indexOf(".");
+      if (dot < 1) continue;
+      const kind = part.slice(0, dot), rest = part.slice(dot + 1);
+      if (kind === "m" || kind === "i") {
+        let ref = "";
+        try { ref = decodeURIComponent(rest).trim(); } catch { continue; }
+        if (!PAPER_REF.test(ref)) continue;
+        out.blocks.push(kind === "m"
+          ? { kind: "story", story: "meeting", pid: ref }
+          : { kind: "story", story: "issue", slug: ref });
+      } else if (kind === "r") {
+        const clips = [];
+        for (const cs of rest.split("~")) {
+          if (clips.length >= PAPER_MAX_CLIPS) break;
+          const colon = cs.indexOf(":");
+          if (colon < 1) continue;
+          let pid = "";
+          try { pid = decodeURIComponent(cs.slice(0, colon)).trim(); }
+          catch { continue; }
+          const seg = cs.slice(colon + 1).split("-");
+          if (!PAPER_REF.test(pid) || seg.length !== 2) continue;
+          const start = parseFloat(seg[0]), end = parseFloat(seg[1]);
+          if (!isFinite(start) || start < 0 || !isFinite(end) || end <= start) continue;
+          clips.push({ pid, start: r1(start), end: r1(end) });
+        }
+        if (clips.length) out.blocks.push({ kind: "reel", clips });
+      }
+    }
+    return out;
+  }
+
+  /* arrange: the panel's ↑ ↓ ✕, one function. Index-addressed against the
+     draft as it is NOW — a stale index (another tab just edited) can at worst
+     move the wrong neighbour once, and the repaint shows exactly what held. */
+  function movePaperBlock(i, act) {
+    const p = readPaper();
+    if (!(i >= 0 && i < p.blocks.length)) return;
+    let focus;
+    if (act === "pdel") {
+      p.blocks.splice(i, 1);
+      // after a delete, focus the NEXT ROW'S LABEL, never its ✕ — held Enter
+      // on one delete must not cascade through the whole paper
+      focus = p.blocks.length
+        ? { act: "row", i: Math.min(i, p.blocks.length - 1) }
+        : { act: "title" };
+    } else {
+      const j = act === "pup" ? i - 1 : i + 1;
+      if (j < 0 || j >= p.blocks.length) return;
+      const t = p.blocks[i]; p.blocks[i] = p.blocks[j]; p.blocks[j] = t;
+      // keyboard focus follows the block it was moving — the repaint must not
+      // drop it on <body> mid-arrangement
+      focus = { act, i: j };
+    }
+    if (!savePaper(p)) toast("this browser blocks storage — the change didn’t hold");
+    refreshPaperSummary(focus); schedulePaperRender();
+  }
+  /* add the open page as a story. The meta that rides along comes from the
+     page's own plane — already in the fetch cache when the page hydrated — so
+     the panel can label the block without lying; a plane that will not load
+     still adds the bare ref, and the reader's render enriches later. */
+  async function addPageToPaper() {
+    const ref = pageStoryRef();
+    if (!ref) { toast("open a meeting or an issue to add it as a story"); return; }
+    const dup = p => ref.story === "meeting"
+      ? p.blocks.some(b => b.kind === "story" && b.story === "meeting" && b.pid === ref.pid)
+      : p.blocks.some(b => b.kind === "story" && b.story === "issue" && b.slug === ref.slug);
+    if (dup(readPaper())) {
+      toast(`this ${ref.story} is already in your paper`); return; }
+    let nb;
+    if (ref.story === "meeting") {
+      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(ref.pid)}.json`) || {};
+      nb = normalizeBlock({ kind: "story", story: "meeting", pid: ref.pid,
+        title: m.title || "", date: m.date || "", body: m.body || "",
+        town: m.town || "", thumb: m.thumb || "" });
+    } else {
+      const it = await getJSON(`${BASE}/issues/${encodeURIComponent(ref.slug)}.json`) || {};
+      nb = normalizeBlock({ kind: "story", story: "issue", slug: ref.slug,
+        name: it.name || "", n_meetings: it.n_meetings,
+        first_seen: it.first_seen || "", last_seen: it.last_seen || "" });
+    }
+    if (!nb) { toast("this page can’t join a paper"); return; }
+    // the fetch awaited — re-read the draft so an edit made meanwhile (this
+    // tab or another) isn’t silently reverted by a stale snapshot
+    const p = readPaper();
+    if (dup(p)) { toast(`this ${ref.story} is already in your paper`); return; }
+    p.blocks.push(nb);
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    refreshPaperSummary(); schedulePaperRender();
+    toast("added to your paper");
+  }
+  /* the reel joins as a snapshot: the block holds these clips as they are
+     now, and the tray keeps rolling — tick more moments and add again for a
+     second reel. (A live pointer would rewrite a shared paper behind the
+     editor's back.) */
+  function addReelToPaper() {
+    const clips = readReel(REEL_KEY);
+    if (!clips.length) {
+      toast("no clips yet — open a meeting and tick its moments"); return; }
+    const p = readPaper();
+    const nb = normalizeBlock({ kind: "reel", clips: clips.map(c => ({ ...c })) });
+    if (!nb) { toast("these clips don’t make a playable reel"); return; }
+    p.blocks.push(nb);
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    refreshPaperSummary(); schedulePaperRender();
+    toast("reel added to your paper — the tray keeps rolling");
+  }
+  function clearPaper() {
+    try { localStorage.removeItem(PAPER_KEY); } catch { /* private mode */ }
+    retireShortOut();   // removeItem bypasses savePaper — retire here too
+    refreshPaperSummary(); schedulePaperRender();
+    toast("draft cleared — the record is untouched");
+  }
+
+  /* the export: paper.json, the receipt a paper leaves. Like reel.json it is
+     honest about provenance (every block carries its own record URL) and
+     about limits (the blocks are refs; the record renders them). */
+  function paperJSON(p) {
+    p = normalizePaper(p);
+    return {
+      schema: "publicrecord.paper/1",
+      title: p.title || "a paper from the record",
+      made_with: "publicrecord.studio",
+      note: "A curated front page of the public record. Every block points "
+        + "back into the record; the share link renders it anywhere.",
+      share: paperShareURL(p),
+      blocks: p.blocks.map(b => b.kind === "reel"
+        ? { kind: "reel", runtime: reelRuntime(b.clips),
+            play: reelShareURL(b.clips),
+            clips: b.clips.map(c => ({ pid: c.pid, start: r1(c.start),
+              end: r1(c.end), kind: c.kind || "moment", quote: c.quote || "" })) }
+        : b.story === "issue"
+          ? { kind: "story", story: "issue", slug: b.slug, name: b.name || "",
+              url: `${location.origin}${BASE}/i/${b.slug}` }
+          : { kind: "story", story: "meeting", pid: b.pid, title: b.title || "",
+              date: b.date || "", body: b.body || "", town: b.town || "",
+              url: `${location.origin}${BASE}/m/${b.pid}` }),
+    };
+  }
+  function downloadPaper(p) {
+    const doc = paperJSON(p);
+    const name = (doc.title.toLowerCase().replace(/[^\w-]+/g, "-")
+      .replace(/^-+|-+$/g, "").slice(0, 40) || "paper");
+    const blob = new Blob([JSON.stringify(doc, null, 2)],
+                          { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}.paper.json`;
+    a.click(); URL.revokeObjectURL(a.href);
+    toast("paper.json downloaded — your paper, as a file you keep");
+  }
+
+  /* ---- PART 2: SHARING's server half + the /app/p renderer ----------------
+     Everything above travels without a server. The two functions below are
+     the paper's whole acquaintance with one: an explicit press of "short
+     link" (POST the portable form, get the content address back) and the
+     read of a `?p=` address someone shared. Both fail soft to the covenant
+     substrate — the long link and the file. */
+  let PAPER_SHORT = "";   // the last short link minted, valid until the paper changes
+  /* retire the minted link EVERYWHERE the paper can change: the variable
+     (savePaper zeroes it too) AND the painted node — a sibling-node removal,
+     so the no-repaint-under-the-caret rule stands. Without both halves the
+     panel keeps showing a link that serves the OLD paper. */
+  function retireShortOut() {
+    PAPER_SHORT = "";
+    const so = STUDIO && $(".cz-pshort-out", STUDIO);
+    if (so) so.remove();
+  }
+  async function paperShortLink() {
+    const p = readPaper();
+    if (!p.blocks.length && !p.title) {
+      toast("your paper is empty — nothing to share yet"); return; }
+    if (!API) {
+      copyText(paperShareURL(p),
+        "this pressing has no share store — full link copied"); return; }
+    const ctl = new AbortController();
+    const bell = setTimeout(() => ctl.abort(), API_TIMEOUT_MS);
+    try {
+      const r = await fetch(API + "/api/papers", {
+        method: "POST", credentials: "omit", signal: ctl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(portablePaper(p)) });
+      if (!r.ok) throw new Error(String(r.status));
+      const d = await r.json();
+      if (!d || !/^[0-9a-f]{16}$/.test(d.id || "")) throw new Error("bad id");
+      // paint the link into the panel FIRST: the await may have outlived the
+      // click's user activation, and a clipboard some browsers then refuse
+      // must not be the only place the link exists
+      PAPER_SHORT = `${location.origin}${BASE}/p?p=${d.id}`;
+      // the repaint must hand focus back to the button that was pressed
+      refreshPaperSummary({ act: "pshort" });
+      copyText(PAPER_SHORT,
+        "short link copied — it serves this paper exactly as it stands");
+    } catch {
+      copyText(paperShareURL(p),
+        "the share store didn’t answer — full link copied instead");
+    } finally { clearTimeout(bell); }
+  }
+  async function fetchStoredPaper(id) {
+    if (!API) return null;
+    const ctl = new AbortController();
+    const bell = setTimeout(() => ctl.abort(), API_TIMEOUT_MS);
+    try {
+      const r = await fetch(`${API}/api/papers/${id}`,
+        { signal: ctl.signal, credentials: "omit" });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch { return null; }
+    finally { clearTimeout(bell); }
+  }
+
+  /* the reader's side: /app/p. Decode whichever form arrived (stored id →
+     link → this browser's draft), fetch the record's own planes for what the
+     blocks reference, and render — in the paper palette, whatever mode the
+     EDITOR liked. A story whose meeting or issue is not in this pressing
+     says so in place; a reel's clips enrich from their meetings' moments the
+     way /app/r does. */
+  let PAPER_DRAFT_PAGE = false;      // this /app/p render came from the draft
+  let PAPER_RERENDER = 0;
+  let PAPER_GEN = 0;                 // render generation — a stale async render must not land
+  function schedulePaperRender() {
+    if (!PAPER_DRAFT_PAGE) return;   // not on /app/p, or it renders a shared paper
+    clearTimeout(PAPER_RERENDER);
+    PAPER_RERENDER = setTimeout(() => paper(), 350);
+  }
+  /* fetch a set of planes a few at a time: the 8-worker pool is what protects
+     the host from a hostile link's burst; the cap is sized to the document
+     model's own envelope, so no sanctioned paper hits it. Returns what was
+     fetched AND what was attempted — a ref past the cap must read as "beyond
+     this page's budget", never as the lie "curated away". */
+  async function fetchPlanes(ids, path, cap) {
+    const got = {}, tried = new Set();
+    const list = [...ids].slice(0, cap);
+    let i = 0;
+    const worker = async () => {
+      while (i < list.length) {
+        const id = list[i++];
+        tried.add(id);
+        const d = await getJSON(`${BASE}/${path}/${encodeURIComponent(id)}.json`);
+        if (d) got[id] = d;
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(8, list.length) }, worker));
+    return { got, tried };
+  }
+  async function paper() {
+    const el = $("#paperbody"); if (!el) return;
+    const gen = ++PAPER_GEN;
+    const st = decodePaper(location.search);
+    if (st.v && !PAPER_VS.includes(st.v))
+      return paperMessage(el, "This paper was shared from a newer version of "
+        + `the record than this one. Open <a href="${BASE}/">the record</a> — `
+        + "every story a paper cites reads there in place.");
+    let doc = null, from = "";
+    if (st.id) {
+      const stored = await fetchStoredPaper(st.id);
+      if (gen !== PAPER_GEN) return;   // a newer render superseded this one
+      if (!stored) return paperMessage(el, "No paper answers at this address. "
+        + "The share store may be unreachable, the id may have lost a "
+        + "character, or the paper was taken down. Papers also travel as full "
+        + "links and <code>paper.json</code> files — ask whoever shared this "
+        + `for one, or open <a href="${BASE}/">the record</a> itself.`);
+      doc = normalizePaper(stored); from = "stored";
+    } else if (st.blocks.length || st.title) {
+      doc = normalizePaper({ title: st.title, blocks: st.blocks }); from = "link";
+    } else if ((location.search || "").length > 1) {
+      // a query arrived but nothing decoded — a mangled link or a broken id.
+      // Showing the reader THEIR draft here would mislabel what they were
+      // sent; say what happened instead.
+      return paperMessage(el, "This link doesn’t carry a readable paper — it "
+        + "may have lost characters in transit. Ask whoever shared it for a "
+        + "fresh link or a <code>paper.json</code> file, or open "
+        + `<a href="${BASE}/">the record</a> itself.`);
+    } else {
+      doc = readPaper(); from = "draft";
+      // arm the re-render gate BEFORE the empty early-return: a page opened
+      // on an empty draft must still repaint as the paper takes shape in the
+      // panel beside it (four review lenses caught this one).
+      PAPER_DRAFT_PAGE = true;
+      if (!doc.blocks.length && !doc.title)
+        return paperMessage(el, "No paper here yet — this page renders one "
+          + "when a link carries it, or shows your own draft. Enter the "
+          + `studio on any page of <a href="${BASE}/">the record</a>, add `
+          + "the stories and reels that matter to you, and your paper takes "
+          + "shape here.");
+    }
+    PAPER_DRAFT_PAGE = from === "draft";
+    document.title = `${doc.title || "A paper"} — publicrecord.studio`;
+    // one fetch per meeting or issue the paper touches, however many blocks.
+    // Stories pool BEFORE reel clips, so a single-story block can never lose
+    // its fetch budget to a reel's fan-out.
+    const mpids = new Set(), islugs = new Set();
+    for (const b of doc.blocks) {
+      if (b.kind === "story" && b.story === "meeting") mpids.add(b.pid);
+      else if (b.kind === "story") islugs.add(b.slug);
+    }
+    for (const b of doc.blocks)
+      if (b.kind === "reel") b.clips.forEach(c => mpids.add(c.pid));
+    const [m, it] = await Promise.all([
+      fetchPlanes(mpids, "meetings", PAPER_MAX_BLOCKS + PAPER_MAX_CLIPS),
+      fetchPlanes(islugs, "issues", PAPER_MAX_BLOCKS),
+    ]);
+    if (gen !== PAPER_GEN) return;     // a newer render superseded this one
+    const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
+    const head = `<header class="phead">
+        <h2 class="ptitle">${esc(doc.title || "Untitled paper")}</h2>
+        <p class="pfrom">${from === "draft"
+          ? "your draft — it lives in this browser; share it from the studio as a link or a file"
+          : from === "stored"
+            ? "served from the share store — content-addressed and read-only; the editor holds the original"
+            : "carried whole in the link you followed — no server held it"}</p>
+      </header>`;
+    const blocks = doc.blocks.map(b => renderPaperBlock(b, mby, iby, tried))
+      .filter(Boolean).join("");
+    // a title-only paper is a sanctioned form — say what it is, not that its
+    // (nonexistent) blocks were curated away
+    el.innerHTML = head + (blocks
+      || (doc.blocks.length
+        ? `<p class="hint">This paper’s blocks aren’t in this pressing of the
+            record — its meetings or issues may have been curated away. The
+            <a href="${BASE}/">record itself</a> is one link up.</p>`
+        : `<p class="hint">This paper is a title so far — its editor hasn’t
+            added stories or reels yet. The <a href="${BASE}/">record
+            itself</a> is one link up.</p>`));
+  }
+  function renderPaperBlock(b, mby, iby, tried) {
+    tried = tried || { m: new Set(), i: new Set() };
+    if (b.kind === "story" && b.story === "meeting") {
+      const m = mby[b.pid];
+      if (!m) return tried.m.has(b.pid)
+        ? paperGone(`a meeting (${b.pid})`)
+        : paperBudget("a meeting");
+      return `<a class="mcard pb-story" href="${BASE}/m/${esc(b.pid)}">`
+        + (m.thumb ? `<img loading="lazy" src="${esc(m.thumb)}" alt="" width="96" height="54">` : "")
+        + `<div class="mc-body"><span class="chip">${esc(m.body || "meeting")}</span>`
+        + `<b>${esc(m.title || b.pid)}</b>`
+        + `<span class="mc-meta">${esc([m.date, m.town].filter(Boolean).join(" · "))}</span>`
+        + `</div></a>`;
+    }
+    if (b.kind === "story" && b.story === "issue") {
+      const it = iby[b.slug];
+      if (!it) return tried.i.has(b.slug)
+        ? paperGone(`an issue (${b.slug})`)
+        : paperBudget("an issue");
+      const span = [it.first_seen, it.last_seen].filter(Boolean);
+      return `<a class="mcard pb-story" href="${BASE}/i/${esc(b.slug)}">`
+        + `<div class="mc-body"><span class="chip">issue</span>`
+        + `<b>${esc(it.name || b.slug)}</b>`
+        + `<span class="mc-meta">${it.n_meetings || 0} meeting${it.n_meetings === 1 ? "" : "s"}`
+        + (span.length ? ` · ${esc(span.join(" — "))}` : "") + `</span>`
+        + `</div></a>`;
+    }
+    if (b.kind === "reel") {
+      const clips = b.clips.map(c => {
+        const m = mby[c.pid]; if (!m) return null;
+        const mo = nearestMoment(m.moments || [], c.start);
+        return { ...c, t: mo ? r1(mo.t) : c.start,
+                 kind: mo ? mo.kind : "moment", quote: mo ? mo.quote : "",
+                 mtitle: m.title || "" };
+      }).filter(Boolean);
+      if (!clips.length)
+        return b.clips.some(c => !tried.m.has(c.pid))
+          ? paperBudget("a reel") : paperGone("a reel (its meetings)");
+      const multi = reelPids(clips).length > 1;
+      const rows = clips.map((c, i) =>
+        `<a class="reelcite" href="${BASE}/m/${esc(c.pid)}#t${Math.floor(c.t)}">
+          <span class="rc-ord">${i + 1}</span>
+          <span class="rc-body">${multi ? `<span class="rc-from">${esc(c.mtitle || c.pid)}</span>` : ""}
+            <span class="rc-quote">${esc(c.quote || "(moment)")}</span>
+            <span class="rc-meta"><span class="rt-kind">${esc(c.kind)}</span>
+              <span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span></span>
+          </span></a>`).join("");
+      return `<section class="pb-reel">
+          <div class="sectionhead"><span class="kicker">a reel —
+            ${clips.length} moment${clips.length > 1 ? "s" : ""}${multi
+              ? ` across ${reelPids(clips).length} meetings` : ""}
+            · ${hms(reelRuntime(clips))}</span></div>
+          <div class="reelcitelist">${rows}</div>
+          <p class="pb-play"><a class="btn primary"
+            href="${esc(reelShareURL(clips))}">▶ play this reel</a></p>
+        </section>`;
+    }
+    return "";
+  }
+  const paperGone = what => `<p class="pb-gone">This paper cites ${esc(what)} `
+    + `that isn’t in this pressing of the record — it may have been curated `
+    + `away, or pressed under a different id.</p>`;
+  const paperBudget = what => `<p class="pb-gone">This paper cites more of the `
+    + `record than one page fetches at once — ${esc(what)} here was left `
+    + `unfetched, not judged gone. The record itself holds it.</p>`;
+  function paperMessage(el, html) {
+    if (el) el.innerHTML = `<p class="hint">${html}</p>`;
   }
 
   /* ================= SEARCH ================= */
@@ -1821,6 +2489,9 @@
     // can re-centre it over the shifted paper — an inline left:50% would beat the
     // rule. Only visibility is toggled here.
     if (!toEl) { toEl = document.createElement("div"); toEl.className = "cz-toast";
+      // a status region: every confirmation the sighted reader gets, a screen
+      // reader hears — polite, so it never interrupts mid-sentence
+      toEl.setAttribute("role", "status");
       document.body.appendChild(toEl); }
     toEl.textContent = msg; toEl.classList.add("on");
     clearTimeout(toEl._t); toEl._t = setTimeout(() => toEl.classList.remove("on"), 2600);

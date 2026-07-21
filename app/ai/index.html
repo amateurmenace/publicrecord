@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-src https://www.youtube-nocookie.com; img-src 'self' https://i.ytimg.com data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://record-api-907309358085.us-east1.run.app; object-src 'none'">
+<meta name="record-api" content="https://record-api-907309358085.us-east1.run.app">
+<title>The AI constitution — publicrecord.studio</title>
+<meta name="description" content="When a model touches this record, whose model it is, where it runs, and what stands when it is gone — every promise checkable, part of the Community AI Project.">
+<link rel="canonical" href="https://publicrecord.studio/app/ai">
+<meta property="og:type" content="website">
+<meta property="og:title" content="The AI constitution — publicrecord.studio">
+<meta property="og:description" content="When a model touches this record, whose model it is, where it runs, and what stands when it is gone — every promise checkable, part of the Community AI Project.">
+<meta property="og:url" content="https://publicrecord.studio/app/ai"><meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#f8fafc">
+<link rel="icon" href="/app/favicon.svg">
+<link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="The record — new meetings and resurfacings" href="/app/feeds/firehose.xml">
+<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.7">
+</head><body><header class="masthead">
+  <div class="nameplate">
+    <a class="brand" href="/app/" aria-label="publicrecord.studio — the record">
+      <span class="brandmark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><rect x="2" y="2" width="92" height="92" rx="20" fill="#ffffff" stroke="#94a3b8" stroke-width="2"></rect><rect x="22" y="28" width="52" height="8" fill="#052e16"></rect><rect x="22" y="44" width="52" height="8" fill="#052e16"></rect><rect x="22" y="60" width="34" height="8" fill="#052e16"></rect></svg></span>
+      <span class="wm">publicrecord<span class="tld">.studio</span></span>
+    </a>
+  </div>
+  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">1</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">11</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">the AI constitution</a></div><span class="dateline">pressed from the record of <b>2026-06-18</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
+  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink" href="/app/s">Search</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink" href="/app/press">The press</a></nav>
+</header><main class="main paper" id="app"><div class="scopebanner" id="scopebanner" hidden></div>
+  <section class="aipage">
+    <a class="back" href="/app/">← the record</a>
+    <h1>The AI constitution</h1>
+    <p class="presslede">Making a tool once required permission — a degree, a
+      department, a budget line. AI collapses the distance between wishing a
+      tool existed and building it: anyone who understands a problem can now
+      build the thing that meets it. Toolmaking, the oldest civic craft,
+      becomes available to everyone. But that potential won't bend toward the
+      public good on its own — not while the companies building AI are the only
+      ones deciding what it's for. This page is what deciding for ourselves
+      looks like: every place a model touches this record, named; every promise,
+      checkable.</p>
+
+    <a class="aiband" href="https://communityai.studio">
+      <span class="aiband-kicker">part of the Community AI Project</span>
+      <span class="aiband-line">A live experiment in taking hold of AI and
+        pointing it at civic life — open-source, locally-owned tools, deployed
+        in real neighborhoods, so communities shape their own future rather
+        than rent it. Read the whole argument at communityai.studio →</span>
+    </a>
+
+    <div class="sectionhead"><span class="kicker">the articles — what we
+      promise, and how to check us</span></div>
+    <ol class="ailist">
+      <li><b>The record is the source.</b> Models summarize, find, and label;
+        they never replace the transcript. Every AI-made line sits beside the
+        record it came from, and points back to it.
+        <details><summary>check it yourself</summary><p>Open any meeting: the
+          summary is one labeled paragraph above the complete transcript, and
+          every moment deep-links a timestamp on the tape.</p></details></li>
+      <li><b>Disclosure at the point of use.</b> Anything a model wrote is
+        labeled where you read it — “AI summary” on the page,
+        <code>ai:&lt;model&gt;</code> in the data. Nothing AI-made is passed
+        off as the record.
+        <details><summary>check it yourself</summary><p>Every meeting's own
+          plane (<code>meetings/&lt;id&gt;.json</code>) carries a
+          <code>summary_origin</code> field: <code>ai:&lt;model&gt;</code>
+          when a model drafted it, <code>extractive</code> when the sentences
+          came from the transcript itself.</p></details></li>
+      <li><b>Reading never requires AI.</b> Meaning search is an upgrade, not
+        a dependency: when the model is off, the static keyword index answers
+        and the page says so. Every page reads with every server gone.
+        <details><summary>check it yourself</summary><p>Search the record,
+          then search it again offline — the results say which index answered.
+          The <a href="/app/covenant">covenant</a> holds the larger promise:
+          static files only.</p></details></li>
+      <li><b>Readers are never fed to models.</b> The models see public record
+        text — transcripts, agendas, minutes — and, for search, the words of
+        your query alone. Never anything about you: no account, cookie, or
+        analytics exists here to share.
+        <details><summary>check it yourself</summary><p>The
+          <a href="/app/covenant">covenant</a> is enforced by a strict
+          Content-Security-Policy on every page — no third-party script or
+          beacon can load, and the search call carries no identity.</p></details></li>
+      <li><b>People gate the record.</b> Nothing enters on a model's say-so: a
+        steward approves every submitted meeting; corrections annotate, never
+        rewrite. AI drafts; people decide.
+        <details><summary>check it yourself</summary><p>Submit a meeting from
+          <a href="/app/add">the add page</a> — the reply says a steward
+          reviews it before the record updates.</p></details></li>
+      <li><b>Local first where it counts.</b> The desk tools run their models
+        on your machine — noise reduction, voice isolation, rotoscoping — and
+        nothing leaves the room. The hosted record uses a cloud model only
+        where static files structurally cannot (embedding a search query at
+        the moment you ask it), and names the model it uses.
+        <details><summary>check it yourself</summary><p>Install the desk from
+          <a href="/app/press">the press</a> — then unplug the network and cut
+          a film. It all still works.</p></details></li>
+      <li><b>Open to audit.</b> The code that pressed this page — prompts,
+        gates, fallbacks — is public under AGPL-3.0, a license whose purpose
+        is that a public thing stays public. A constitution nobody can audit
+        is a press release.
+        <details><summary>check it yourself</summary><p>The source is at
+          <a href="https://github.com/amateurmenace/control-z">github.com/amateurmenace/control-z</a>;
+          which license covers which part is in
+          <a href="https://github.com/amateurmenace/control-z/blob/main/LICENSING.md">LICENSING.md</a>.</p></details></li>
+      <li><b>Built with AI, signed by people.</b> This software is itself
+        developed with AI assistance — the same collapse of distance we argue
+        for is how a tiny shop built a record this size. Every change lands in
+        a public commit a person reviewed and signed.
+        <details><summary>check it yourself</summary><p>The commit history is
+          public — the AI-assisted work is co-authored in the open, not
+          laundered.</p></details></li>
+    </ol>
+
+    <div class="sectionhead"><span class="kicker">where the models sit</span></div>
+    
+    <svg class="aidiagram" viewBox="0 0 720 240" role="img"
+         aria-label="Where models sit in the record's pipeline: the tape becomes
+         a transcript (speech-to-text on our hardware only when official
+         captions are missing); the transcript becomes the record (summaries
+         drafted by a labeled model, everything else by open rules); the record
+         reaches your reading (meaning search embeds your query; the keyword
+         index answers without it). The ledger below carries the same facts as
+         a table.">
+      <g fill="none" stroke="#052e16" stroke-width="2">
+        <rect x="8"   y="92" width="150" height="52" rx="4"/>
+        <rect x="214" y="92" width="150" height="52" rx="4"/>
+        <rect x="420" y="92" width="150" height="52" rx="4"/>
+        <path d="M158 118 h48 m-10 -6 10 6 -10 6"/>
+        <path d="M364 118 h48 m-10 -6 10 6 -10 6"/>
+        <path d="M570 118 h48 m-10 -6 10 6 -10 6"/>
+      </g>
+      <g font-family="'JetBrains Mono',monospace" font-size="14" fill="#0f172a"
+         text-anchor="middle">
+        <text x="83"  y="123">the tape</text>
+        <text x="289" y="123">the transcript</text>
+        <text x="495" y="123">the record</text>
+        <text x="668" y="123" fill="#052e16" font-weight="700">you</text>
+      </g>
+      <g font-family="'JetBrains Mono',monospace" font-size="11" fill="#475569">
+        <g stroke="#059669" stroke-dasharray="4 3" fill="none">
+          <path d="M186 60 v26"/><path d="M392 60 v26"/><path d="M598 60 v26"/>
+        </g>
+        <text x="186" y="40" text-anchor="middle">no captions? speech-to-text,</text>
+        <text x="186" y="54" text-anchor="middle">our hardware</text>
+        <text x="392" y="40" text-anchor="middle">summary drafted by a model —</text>
+        <text x="392" y="54" text-anchor="middle">labeled, fallback stands alone</text>
+        <text x="598" y="40" text-anchor="middle">meaning search embeds</text>
+        <text x="598" y="54" text-anchor="middle">your query, nothing about you</text>
+        <text x="360" y="200" text-anchor="middle">moments · reels · kits · papers · the front page — open rules, no model</text>
+        <text x="360" y="222" text-anchor="middle" fill="#052e16">every dashed line is optional; the record reads with all of them gone</text>
+      </g>
+    </svg>
+
+    <div class="sectionhead"><span class="kicker">the ledger — when, whose,
+      where, and what stands without it</span></div>
+    <div class="aitable-wrap"><table class="aitable">
+      <thead><tr><th>where you meet it</th><th>what the model does</th>
+        <th>whose model</th><th>where it runs</th><th>without it</th></tr></thead>
+      <tbody>
+        <tr><td>meaning search</td>
+          <td>turns your query and the record's segments into vectors so
+            related passages match</td>
+          <td>Google <code>gemini-embedding-001</code></td>
+          <td>our server, at the moment you search; it sees the query text
+            and nothing about you</td>
+          <td>the static keyword index answers, labeled “lexical”</td></tr>
+        <tr><td>meeting summaries</td>
+          <td>drafts one paragraph from the transcript</td>
+          <td>Google Gemini (Flash) — labeled <code>ai:&lt;model&gt;</code>
+            in the data</td>
+          <td>our pipeline, at press time, over public transcript text</td>
+          <td>an extractive summary — sentences drawn from the transcript
+            itself, labeled <code>extractive</code></td></tr>
+        <tr><td>issue names &amp; labels</td>
+          <td>suggests a plain name for a thread that spans meetings</td>
+          <td>the same Gemini lane, labeled the same way</td>
+          <td>our pipeline, at press time</td>
+          <td>a keyword-derived name</td></tr>
+        <tr><td>transcripts</td>
+          <td>speech-to-text, only when a tape arrives with no official
+            captions</td>
+          <td>an open Whisper-family model</td>
+          <td>our own hardware — the audio is never sent to a third party</td>
+          <td>official captions are always preferred; a tape with neither
+            ships as a document, not a guess</td></tr>
+        <tr><td>moments · reels · kits · your paper · the front page</td>
+          <td colspan="2"><b>no model at all</b> — open keyword rules and
+            extraction, readable in the source</td>
+          <td>your browser, or press time</td>
+          <td>they are the fallback</td></tr>
+        <tr><td>the desk — <a href="https://civicmedia.studio">civicmedia.studio</a>
+            / <a href="https://control-z.org">Control-Z</a></td>
+          <td>noise reduction, voice isolation, rotoscoping, film emulation</td>
+          <td>open models, bundled with the app</td>
+          <td><b>your machine only</b> — offline works; no account, no cloud,
+            nothing leaves the room</td>
+          <td>they are the tool</td></tr>
+      </tbody>
+    </table></div>
+
+    <div class="sectionhead"><span class="kicker">use AI that stays local</span></div>
+    <p class="aip">The record is the reading half; the making half is a desk of
+      free, open-source tools whose models run entirely on your computer.
+      Community media stations, filmmakers, and neighbors finish real work with
+      them — denoise a meeting tape, isolate a voice, cut a reel into a film —
+      with the network cable out of the wall. That is what “locally-owned AI”
+      means here: not a slogan, a download.
+      <a href="/app/press">Get the desk from the press →</a></p>
+
+    <div class="sectionhead"><span class="kicker">understand it deeper</span></div>
+    <ul class="ailinks">
+      <li><a href="https://communityai.studio">communityai.studio</a> — the program's whole
+        argument: why civic AI, why open source, why locally owned.</li>
+      <li><a href="/app/covenant">the covenant</a> — the promises this site
+        keeps about you, enforced in the browser.</li>
+      <li><a href="https://github.com/amateurmenace/control-z">the source</a> — every prompt, gate, and
+        fallback named on this page, in the open.</li>
+      <li><a href="https://www.elementsofai.com/">Elements of AI</a> — a free,
+        plain-language university course; the best first step we know.</li>
+      <li><a href="https://www.youtube.com/watch?v=wjZofJX0v4M">But what is a
+        GPT?</a> — 3Blue1Brown's visual walk through how language models
+        actually work.</li>
+      <li><a href="https://www.eff.org/issues/artificial-intelligence">EFF on
+        AI</a> — the civil-liberties view: rights, risks, and policy.</li>
+    </ul>
+
+    <p class="hint">This edition was pressed 2026-06-18
+      from a corpus fingerprinted 66c05a9544c70585. When our
+      use of AI changes, this page changes in the same commit.</p>
+  </section>
+</main><footer class="foot">
+  <span class="foot-mark"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96"><rect x="2" y="2" width="92" height="92" rx="20" fill="#ffffff" stroke="#94a3b8" stroke-width="2"></rect><rect x="22" y="28" width="52" height="8" fill="#052e16"></rect><rect x="22" y="44" width="52" height="8" fill="#052e16"></rect><rect x="22" y="60" width="34" height="8" fill="#052e16"></rect></svg></span>
+  <a class="cov" href="/app/covenant">the covenant</a>
+  <a class="cov" href="/app/ai">the AI constitution</a>
+  <a class="cov" href="/app/press">the press · get the desktop app</a>
+  <a class="scopelink" href="#scope">town — change</a>
+  <span class="foot-credit">an open source project from
+    <a href="https://weirdmachine.org">weird machine</a> and
+    <a href="https://brooklineinteractive.org">brookline interactive group</a>.
+    this project uses AI in accordance with
+    <a href="/app/ai">our AI constitution</a>.</span>
+  <span class="ed">edition 2026-06-18 · v2.1.7</span>
+</footer><script src="/app/app.js?v=2.1.7"></script></body></html>
