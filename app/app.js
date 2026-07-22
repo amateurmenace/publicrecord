@@ -255,6 +255,8 @@
       // paperShortLink, behind this explicit press and nowhere else.
       else if (act === "padd") addPageToPaper();
       else if (act === "preel") addReelToPaper();
+      else if (act === "pnote") addNoteToPaper();
+      else if (act === "pchart") addChartToPaper(b.dataset.chart, b.dataset.ref || "");
       else if (act === "pup" || act === "pdown" || act === "pdel")
         movePaperBlock(+b.dataset.i, act);
       else if (act === "plink") copyText(paperShareURL(readPaper()),
@@ -344,14 +346,35 @@
      codec live in their own section below, and the single server touch a
      paper can ever have (the optional short link, §6.2) is behind its button
      there, never on this paint path. */
+  const chartRowLabel = b =>
+      b.chart === "votes" ? "▤ votes over time"
+    : b.chart === "topics" ? "▤ recurring topics"
+    : b.chart === "reach" ? `▤ reach — ${b.name || b.slug}`
+    : b.pid ? `▤ framing — ${b.title || b.pid}`
+    : "▤ framing — the whole record";
   function refreshPaperSummary(focus) {
     if (!STUDIO) return;
     const el = $(".cz-paperbody", STUDIO); if (!el) return;
     const p = readPaper();
     const n = p.blocks.length;
+    // the storage-event and composer paths repaint with no focus arg — if
+    // the caret is in OUR title input or a note, capture it NOW, before the
+    // innerHTML wipe below (after the wipe activeElement is <body> and this
+    // branch can never fire — a review catch; the P1 title read shipped
+    // dead the same way)
+    if (!focus) {
+      const ae = document.activeElement;
+      if (ae && ae.classList && ae.classList.contains("cz-ptitle"))
+        focus = { act: "title", caret: ae.selectionStart };
+      else if (ae && ae.classList && ae.classList.contains("cz-pnote"))
+        focus = { act: "note", i: +ae.dataset.i, caret: ae.selectionStart };
+    }
     const rows = p.blocks.map((b, i) => {
       const label = b.kind === "reel"
         ? `▶ a reel — ${b.clips.length} clip${b.clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(b.clips))}`
+        : b.kind === "note"
+          ? `✎ a note${b.text.trim() ? " — " + b.text.trim().slice(0, 40) : ""}`
+        : b.kind === "chart" ? chartRowLabel(b)
         : b.story === "issue" ? `◈ ${b.name || b.slug}`
         : `§ ${b.title || b.pid}`;
       return `<div class="cz-prow" data-i="${i}">
@@ -363,14 +386,42 @@
             title="move down" aria-label="move block ${i + 1} down"${i < n - 1 ? "" : " disabled"}>↓</button>
           <button type="button" class="cz-pact" data-cz="pdel" data-i="${i}"
             title="remove from your paper" aria-label="remove block ${i + 1}">✕</button>
-        </span></div>`;
+        </span></div>`
+        // the note's words live in their own field under the row — typing
+        // saves on every keystroke and repaints nothing (the title's rule)
+        + (b.kind === "note"
+          ? `<textarea class="cz-pnote" data-i="${i}" rows="3"
+               maxlength="${PAPER_NOTE_MAX}"
+               placeholder="your own words — why this matters"
+               aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea>`
+          : "");
     }).join("");
     const ref = pageStoryRef();
     const clips = readReel(REEL_KEY);
+    /* the chart menu offers what THIS page can chart plus the record-wide
+       three; it opens on demand so the panel stays quiet. */
+    const chartBtn = (chart, refv, label) =>
+      `<button type="button" class="btn" data-cz="pchart" data-chart="${chart}"
+        ${refv ? `data-ref="${esc(refv)}"` : ""}>${esc(label)}</button>`;
+    const chartMenu = `<details class="cz-chartadd">
+        <summary>＋ a chart</summary>
+        <div class="cz-chartmenu">
+          ${ref && ref.story === "meeting" ? chartBtn("framing", ref.pid, "this meeting’s framing") : ""}
+          ${ref && ref.story === "issue" ? chartBtn("reach", ref.slug, "this issue’s reach") : ""}
+          ${chartBtn("votes", "", "votes over time")}
+          ${chartBtn("framing", "", "the record’s framing")}
+          ${chartBtn("topics", "", "recurring topics")}
+        </div></details>`;
     const adds =
         (ref ? `<button type="button" class="btn" data-cz="padd">＋ ${ref.story === "issue" ? "this issue" : "this meeting"}</button>` : "")
-      + (clips.length ? `<button type="button" class="btn" data-cz="preel">＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})</button>` : "");
-    const share = n || p.title ? `<div class="cz-pshare">
+      + (clips.length ? `<button type="button" class="btn" data-cz="preel">＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})</button>` : "")
+      + `<button type="button" class="btn" data-cz="pnote">＋ a note</button>`
+      + chartMenu;
+    // an empty note is arranging surface, not traveling content — the share
+    // row arms only when the PORTABLE paper is non-empty (a review catch:
+    // an empty-note-only draft offered links that decode to "damaged")
+    const live = paperHasLive(p);
+    const share = live ? `<div class="cz-pshare">
         <a class="btn primary" href="${BASE}/p">📰 open your paper</a>
         <button type="button" class="btn" data-cz="plink">⧉ copy link</button>
         <button type="button" class="btn" data-cz="pjson">⬇ paper.json</button>
@@ -379,7 +430,7 @@
       </div>` : "";
     // the last short link minted for THIS paper, shown as a real link — a
     // clipboard is a privilege some browsers withhold, a link on screen is not
-    const shortOut = PAPER_SHORT && (n || p.title)
+    const shortOut = PAPER_SHORT && live
       ? `<p class="cz-pshort-out">short link:
            <a href="${esc(PAPER_SHORT)}">${esc(PAPER_SHORT.replace(location.origin, ""))}</a></p>`
       : "";
@@ -401,24 +452,38 @@
     const ti = $(".cz-ptitle", el);
     if (ti) ti.oninput = () => {
       const d = readPaper();
-      const had = !!(d.blocks.length || d.title);
-      d.title = ti.value.slice(0, PAPER_TITLE_MAX);
-      const has = !!(d.blocks.length || d.title);
+      const had = paperHasLive(d);
+      d.title = cut(ti.value, PAPER_TITLE_MAX);
+      const has = paperHasLive(d);
       if (!savePaper(d)) return;   // storage blocked — a toast per keystroke would be noise
       retireShortOut();            // the painted link names the old title now
       schedulePaperRender();
       if (had !== has)
         refreshPaperSummary({ act: "title", caret: ti.selectionStart });
     };
-    // the storage-event and composer paths repaint with no focus arg — if the
-    // caret was in OUR title input, preserve it rather than dropping to <body>
-    if (!focus) {
-      const ae = document.activeElement;
-      if (ae && ae.classList && ae.classList.contains("cz-ptitle"))
-        focus = { act: "title", caret: ae.selectionStart };
-    }
+    // a note saves the way the title does: every keystroke, no repaint under
+    // the caret (the row's preview label catches up on the next repaint)
+    $$(".cz-pnote", el).forEach(ta => ta.oninput = () => {
+      const d = readPaper();
+      const i = +ta.dataset.i;
+      // a stale index (another tab just rearranged) must not write over a
+      // different block — the storage event's repaint reconciles the panel
+      if (!(d.blocks[i] && d.blocks[i].kind === "note")) return;
+      const had = paperHasLive(d);
+      d.blocks[i].text = noteText(ta.value);
+      const has = paperHasLive(d);
+      if (!savePaper(d)) return;
+      retireShortOut();
+      schedulePaperRender();
+      // crossing the empty↔live boundary changes which share controls
+      // exist — repaint once, caret restored (the title's rule)
+      if (had !== has)
+        refreshPaperSummary({ act: "note", i, caret: ta.selectionStart });
+    });
     if (focus) {
       let t = focus.act === "title" ? ti
+        : focus.act === "note"
+          ? $(`.cz-pnote[data-i="${focus.i}"]`, el)
         : focus.act === "row"
           ? $(`.cz-prow[data-i="${focus.i}"] .cz-plabel`, el)
         : $(`[data-cz="${focus.act}"]`
@@ -433,7 +498,8 @@
         if (t && t.disabled) t = ti;
       }
       if (t) { t.focus();
-        if (focus.act === "title" && typeof focus.caret === "number"
+        if ((focus.act === "title" || focus.act === "note")
+            && typeof focus.caret === "number"
             && t.setSelectionRange) t.setSelectionRange(focus.caret, focus.caret);
       }
     }
@@ -1603,7 +1669,22 @@
      never a throw. */
 
   const PAPER_V = "1";
-  const PAPER_VS = ["1"];
+  const PAPER_VS = ["1", "2"];
+  /* which link version a paper needs: v=1 is the shipped P1 grammar
+     (stories + reels) and stays byte-identical for those papers forever;
+     v=2 marks a paper carrying kinds a v1 reader cannot represent (notes,
+     charts) — the shipped reader then shows its honest "shared from a newer
+     version" message instead of silently rendering a mutilated paper. */
+  const paperV = p => p.blocks.some(
+    b => b.kind === "note" || b.kind === "chart") ? "2" : "1";
+  /* does anything actually TRAVEL — a title, or a block that survives
+     portablePaper (an empty note does not). The share row, the title
+     handler and the note handler all read THIS one truth, so typing across
+     the empty↔live boundary repaints the row that depends on it (the fix
+     re-review's catch: a gate whose truth can change under a keystroke
+     needs a repaint on exactly that boundary). */
+  const paperHasLive = d => !!(d.title
+    || d.blocks.some(b => b.kind !== "note" || b.text.trim()));
   const PAPER_KEY = "cz-paper";        // the one draft this browser keeps
   const PAPER_TITLE_MAX = 200;
   const PAPER_MAX_BLOCKS = 64;
@@ -1612,6 +1693,33 @@
   // and issue slugs to 96 (web/bake.py pid()/islug()) — the cap leaves
   // headroom and matches the store's exactly.
   const PAPER_REF = /^[\w-]{1,128}$/;
+  const PAPER_NOTE_MAX = 2000;         // matches the store's cap (record/papers.py)
+  /* the chart kinds a paper can carry (specs/21 P2) — an enum and a ref,
+     never data: the reader's browser computes every picture from the
+     record's own pressed planes, so a paper cannot assert a number the
+     record would not draw.
+       votes   — the record's roll calls over time      (votes.json)
+       reach   — one issue's appearances, meeting by meeting (issues/<slug>)
+       framing — the eight civic lenses: one meeting (pid) or the whole record
+       topics  — what keeps coming back                 (analytics.json) */
+  const PAPER_CHARTS = ["votes", "reach", "framing", "topics"];
+  /* cut a string at a cap WITHOUT stranding half a surrogate pair — and
+     drop any lone surrogate already inside it (a hand-edited draft can hold
+     one; JSON round-trips it). encodeURIComponent THROWS on a lone half,
+     and decodeReel's law forbids every encoder and decoder here from
+     throwing. (The title's caps get this too — the P1 slice had the same
+     latent crash.) */
+  const cut = (s, n) => s
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+    .replace(/([\uD800-\uDBFF])?([\uDC00-\uDFFF])/g, (m, hi) => hi ? m : "")
+    .slice(0, n).replace(/[\uD800-\uDBFF]$/, "");
+  /* a note's text, made safe to keep: newlines stay (a note has paragraphs),
+     every other control character goes, the cap holds. The client is TOTAL —
+     it cleans and keeps; the store is STRICT — it refuses (record/papers.py).
+     That split is decodeReel's law meeting the store's, one function each. */
+  const noteText = s => cut(String(s == null ? "" : s)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, ""), PAPER_NOTE_MAX);
 
   function readPaper() {
     let p = null;
@@ -1634,7 +1742,7 @@
   function normalizePaper(p) {
     const out = { title: "", blocks: [] };
     if (!p || typeof p !== "object") return out;
-    if (typeof p.title === "string") out.title = p.title.slice(0, PAPER_TITLE_MAX);
+    if (typeof p.title === "string") out.title = cut(p.title, PAPER_TITLE_MAX);
     for (const b of (Array.isArray(p.blocks) ? p.blocks : [])) {
       if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
       const nb = normalizeBlock(b);
@@ -1665,6 +1773,27 @@
         .map(c => ({ ...c, start: r1(c.start), end: r1(c.end) }));
       return clips.length ? { kind: "reel", clips } : null;
     }
+    if (b.kind === "note" && typeof b.text === "string") {
+      // an empty note survives in the DRAFT — it is a block being typed
+      // into; no traveling form carries one (portablePaper drops it, the
+      // store refuses it)
+      return { kind: "note", text: noteText(b.text) };
+    }
+    if (b.kind === "chart" && b.chart === "reach"
+        && typeof b.slug === "string" && PAPER_REF.test(b.slug)) {
+      const nb = { kind: "chart", chart: "reach", slug: b.slug };
+      if (typeof b.name === "string") nb.name = b.name;   // ride-along label
+      return nb;
+    }
+    if (b.kind === "chart" && b.chart === "framing" && b.pid != null) {
+      if (typeof b.pid !== "string" || !PAPER_REF.test(b.pid)) return null;
+      const nb = { kind: "chart", chart: "framing", pid: b.pid };
+      if (typeof b.title === "string") nb.title = b.title;
+      return nb;
+    }
+    if (b.kind === "chart" && (b.chart === "votes" || b.chart === "topics"
+        || b.chart === "framing"))
+      return { kind: "chart", chart: b.chart };
     return null;
   }
 
@@ -1678,9 +1807,19 @@
     return {
       schema: "publicrecord.paper/1",
       title: p.title,
-      blocks: p.blocks.map(b => b.kind === "reel"
+      // an empty note is a draft-in-progress; no traveling form carries one
+      blocks: p.blocks.filter(b => b.kind !== "note" || b.text.trim())
+        .map(b => b.kind === "reel"
         ? { kind: "reel",
             clips: b.clips.map(c => ({ pid: c.pid, start: r1(c.start), end: r1(c.end) })) }
+        : b.kind === "note"
+          ? { kind: "note", text: b.text }
+        : b.kind === "chart"
+          ? (b.chart === "reach"
+              ? { kind: "chart", chart: "reach", slug: b.slug }
+            : b.pid
+              ? { kind: "chart", chart: "framing", pid: b.pid }
+              : { kind: "chart", chart: b.chart })
         : b.story === "issue"
           ? { kind: "story", story: "issue", slug: b.slug }
           : { kind: "story", story: "meeting", pid: b.pid }),
@@ -1688,18 +1827,28 @@
   }
 
   /* the link form: /app/p?v=1&t=<title>&b=<blocks>. Blocks join on ",";
-     a block is m.<pid> | i.<slug> | r.<clip>~<clip>… with clip <pid>:<s>-<e>.
+     a block is m.<pid> | i.<slug> | r.<clip>~<clip>… with clip <pid>:<s>-<e>,
+     c.<chart>[.<ref>] for a chart, n.<text> for a note.
      "~" is RFC-3986-unreserved and appears in no pid, slug or time, so the
-     three separator levels never collide ("+" would decode as a space). */
+     three separator levels never collide ("+" would decode as a space).
+     A note's text is encoded TWICE on purpose: decodePaper's URLSearchParams
+     decodes the whole b= value once BEFORE the "," split, and a note's own
+     commas (and %) must still be opaque at that moment. Refs never need the
+     second coat (their charset has nothing to decode); free text does. */
   function encodePaperQS(p) {
     p = portablePaper(p);
     const parts = p.blocks.map(b =>
       b.kind === "reel"
         ? "r." + b.clips.map(c =>
             `${encodeURIComponent(c.pid)}:${r1(c.start)}-${r1(c.end)}`).join("~")
+      : b.kind === "note"
+        ? "n." + encodeURIComponent(encodeURIComponent(b.text))
+      : b.kind === "chart"
+        ? "c." + b.chart + (b.slug || b.pid
+            ? "." + encodeURIComponent(b.slug || b.pid) : "")
       : b.story === "issue" ? "i." + encodeURIComponent(b.slug)
       : "m." + encodeURIComponent(b.pid));
-    return `v=${PAPER_V}`
+    return `v=${paperV(p)}`
       + (p.title ? `&t=${encodeURIComponent(p.title)}` : "")
       + (parts.length ? `&b=${parts.join(",")}` : "");
   }
@@ -1716,7 +1865,7 @@
     const id = (q.get("p") || "").trim();
     const out = { v: q.get("v") || "",
                   id: /^[0-9a-f]{16}$/.test(id) ? id : "",
-                  title: (q.get("t") || "").slice(0, PAPER_TITLE_MAX),
+                  title: cut(q.get("t") || "", PAPER_TITLE_MAX),
                   blocks: [] };
     for (const part of (q.get("b") || "").split(",")) {
       if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
@@ -1746,6 +1895,31 @@
           clips.push({ pid, start: r1(start), end: r1(end) });
         }
         if (clips.length) out.blocks.push({ kind: "reel", clips });
+      } else if (kind === "n") {
+        // the second decode of the note's double coat (the first was
+        // URLSearchParams's, above); a bad escape drops the block, never throws
+        let text = "";
+        try { text = noteText(decodeURIComponent(rest)); } catch { continue; }
+        if (text.trim()) out.blocks.push({ kind: "note", text });
+      } else if (kind === "c") {
+        const dot2 = rest.indexOf(".");
+        const chart = dot2 < 0 ? rest : rest.slice(0, dot2);
+        if (!PAPER_CHARTS.includes(chart)) continue;
+        if (dot2 < 0) {
+          // bare forms: votes, topics, framing (the whole record) — reach
+          // needs its issue, so a bare reach is a mangle, not a chart
+          if (chart !== "reach") out.blocks.push({ kind: "chart", chart });
+        } else {
+          let ref = "";
+          try { ref = decodeURIComponent(rest.slice(dot2 + 1)).trim(); }
+          catch { continue; }
+          if (!PAPER_REF.test(ref)) continue;
+          if (chart === "reach")
+            out.blocks.push({ kind: "chart", chart: "reach", slug: ref });
+          else if (chart === "framing")
+            out.blocks.push({ kind: "chart", chart: "framing", pid: ref });
+          // votes/topics carry no ref — a reffed one is a mangle, dropped
+        }
       }
     }
     return out;
@@ -1828,6 +2002,52 @@
     refreshPaperSummary(); schedulePaperRender();
     toast("reel added to your paper — the tray keeps rolling");
   }
+  /* a note joins empty and is typed into in the panel — the draft may hold
+     the blank; no traveling form does. Focus lands in the fresh textarea. */
+  function addNoteToPaper() {
+    const p = readPaper();
+    if (p.blocks.length >= PAPER_MAX_BLOCKS) {
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    p.blocks.push({ kind: "note", text: "" });
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    refreshPaperSummary({ act: "note", i: p.blocks.length - 1 });
+    schedulePaperRender();
+  }
+  /* a chart joins as an enum + a ref; the label that rides along comes from
+     the plane the open page already fetched (or one honest fetch), so the
+     panel can name it without lying. The chart itself is computed at render,
+     from the record — never stored numbers. */
+  async function addChartToPaper(chart, refv) {
+    if (!PAPER_CHARTS.includes(chart)) return;
+    const dup = p => p.blocks.some(b => b.kind === "chart" && b.chart === chart
+      && ((b.slug || b.pid || "") === (refv || "")));
+    if (dup(readPaper())) { toast("this chart is already in your paper"); return; }
+    let nb;
+    if (chart === "reach") {
+      if (!refv) { toast("open an issue to chart its reach"); return; }
+      const it = await getJSON(`${BASE}/issues/${encodeURIComponent(refv)}.json`) || {};
+      nb = normalizeBlock({ kind: "chart", chart: "reach", slug: refv,
+                            name: it.name || "" });
+    } else if (chart === "framing" && refv) {
+      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(refv)}.json`) || {};
+      nb = normalizeBlock({ kind: "chart", chart: "framing", pid: refv,
+                            title: m.title || "" });
+    } else {
+      nb = normalizeBlock({ kind: "chart", chart });
+    }
+    if (!nb) { toast("this chart can’t join a paper"); return; }
+    // the fetch awaited — re-read the draft so a meanwhile edit isn't reverted
+    const p = readPaper();
+    if (dup(p)) { toast("this chart is already in your paper"); return; }
+    if (p.blocks.length >= PAPER_MAX_BLOCKS) {
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    p.blocks.push(nb);
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    refreshPaperSummary(); schedulePaperRender();
+    toast("chart added — it draws from the record when your paper renders");
+  }
   function clearPaper() {
     try { localStorage.removeItem(PAPER_KEY); } catch { /* private mode */ }
     retireShortOut();   // removeItem bypasses savePaper — retire here too
@@ -1838,20 +2058,39 @@
   /* the export: paper.json, the receipt a paper leaves. Like reel.json it is
      honest about provenance (every block carries its own record URL) and
      about limits (the blocks are refs; the record renders them). */
+  /* where a chart's numbers live on the record itself — every chart block in
+     the receipt carries the page a reader can recount it on. */
+  function chartRecordURL(b) {
+    return `${location.origin}${BASE}` + (
+      b.chart === "votes" ? "/officials"
+      : b.chart === "reach" ? `/i/${b.slug}`
+      : b.chart === "framing" && b.pid ? `/m/${b.pid}`
+      : "/analytics");
+  }
   function paperJSON(p) {
     p = normalizePaper(p);
     return {
       schema: "publicrecord.paper/1",
       title: p.title || "a paper from the record",
       made_with: "publicrecord.studio",
-      note: "A curated front page of the public record. Every block points "
-        + "back into the record; the share link renders it anywhere.",
+      note: "A curated front page of the public record. Every story, reel "
+        + "and chart points back into the record; a note is the editor's "
+        + "own words. The share link renders it anywhere.",
       share: paperShareURL(p),
-      blocks: p.blocks.map(b => b.kind === "reel"
+      blocks: p.blocks.filter(b => b.kind !== "note" || b.text.trim())
+        .map(b => b.kind === "reel"
         ? { kind: "reel", runtime: reelRuntime(b.clips),
             play: reelShareURL(b.clips),
             clips: b.clips.map(c => ({ pid: c.pid, start: r1(c.start),
               end: r1(c.end), kind: c.kind || "moment", quote: c.quote || "" })) }
+        : b.kind === "note"
+          ? { kind: "note", text: b.text }
+        : b.kind === "chart"
+          ? { kind: "chart", chart: b.chart,
+              ...(b.slug ? { slug: b.slug } : {}),
+              ...(b.pid ? { pid: b.pid } : {}),
+              computed: "in the reader's browser, from the record's own planes",
+              url: chartRecordURL(b) }
         : b.story === "issue"
           ? { kind: "story", story: "issue", slug: b.slug, name: b.name || "",
               url: `${location.origin}${BASE}/i/${b.slug}` }
@@ -1891,7 +2130,8 @@
   }
   async function paperShortLink() {
     const p = readPaper();
-    if (!p.blocks.length && !p.title) {
+    const port = portablePaper(p);   // what would actually travel
+    if (!port.blocks.length && !port.title) {
       toast("your paper is empty — nothing to share yet"); return; }
     if (!API) {
       copyText(paperShareURL(p),
@@ -1902,14 +2142,25 @@
       const r = await fetch(API + "/api/papers", {
         method: "POST", credentials: "omit", signal: ctl.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(portablePaper(p)) });
-      if (!r.ok) throw new Error(String(r.status));
+        body: JSON.stringify(port) });
+      if (!r.ok) {
+        // the store answers in sentences (413 too-large, 422 refused, 503
+        // no bucket) — say ITS reason; "didn’t answer" would be false, and
+        // a 70KB "full link" is not the guidance a too-large paper needs
+        let said = "";
+        try { said = ((await r.json()) || {}).error || ""; } catch { /* not JSON */ }
+        if (said) { toast(said); return; }
+        throw new Error(String(r.status));
+      }
       const d = await r.json();
       if (!d || !/^[0-9a-f]{16}$/.test(d.id || "")) throw new Error("bad id");
       // paint the link into the panel FIRST: the await may have outlived the
       // click's user activation, and a clipboard some browsers then refuse
-      // must not be the only place the link exists
-      PAPER_SHORT = `${location.origin}${BASE}/p?p=${d.id}`;
+      // must not be the only place the link exists. A paper carrying P2
+      // kinds mints a v=2 address, so a reader still on the shipped v1
+      // shell gets the honest newer-version message, never a mutilated one.
+      const pv = paperV(port);
+      PAPER_SHORT = `${location.origin}${BASE}/p?${pv === "1" ? "" : `v=${pv}&`}p=${d.id}`;
       // the repaint must hand focus back to the button that was pressed
       refreshPaperSummary({ act: "pshort" });
       copyText(PAPER_SHORT,
@@ -2011,20 +2262,32 @@
     document.title = `${doc.title || "A paper"} — publicrecord.studio`;
     // one fetch per meeting or issue the paper touches, however many blocks.
     // Stories pool BEFORE reel clips, so a single-story block can never lose
-    // its fetch budget to a reel's fan-out.
+    // its fetch budget to a reel's fan-out. A chart's refs join the same
+    // pools (a framing chart reads its meeting's plane, a reach chart its
+    // issue's); the two record-wide planes a chart can want — votes.json,
+    // analytics.json — are one fetch each, asked for only when a block needs
+    // them.
     const mpids = new Set(), islugs = new Set();
     for (const b of doc.blocks) {
       if (b.kind === "story" && b.story === "meeting") mpids.add(b.pid);
-      else if (b.kind === "story") islugs.add(b.slug);
+      else if (b.kind === "story" && b.story === "issue") islugs.add(b.slug);
+      else if (b.kind === "chart" && b.chart === "framing" && b.pid) mpids.add(b.pid);
+      else if (b.kind === "chart" && b.chart === "reach") islugs.add(b.slug);
     }
     for (const b of doc.blocks)
       if (b.kind === "reel") b.clips.forEach(c => mpids.add(c.pid));
-    const [m, it] = await Promise.all([
+    const wantVotes = doc.blocks.some(b => b.kind === "chart" && b.chart === "votes");
+    const wantAnalytics = doc.blocks.some(b => b.kind === "chart"
+      && (b.chart === "topics" || (b.chart === "framing" && !b.pid)));
+    const [m, it, votesPlane, analytics] = await Promise.all([
       fetchPlanes(mpids, "meetings", PAPER_MAX_BLOCKS + PAPER_MAX_CLIPS),
       fetchPlanes(islugs, "issues", PAPER_MAX_BLOCKS),
+      wantVotes ? getJSON(`${BASE}/votes.json`) : Promise.resolve(null),
+      wantAnalytics ? getJSON(`${BASE}/analytics.json`) : Promise.resolve(null),
     ]);
     if (gen !== PAPER_GEN) return;     // a newer render superseded this one
     const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
+    const aux = { votes: votesPlane, analytics };
     const head = `<header class="phead">
         <h2 class="ptitle">${esc(doc.title || "Untitled paper")}</h2>
         <p class="pfrom">${from === "draft"
@@ -2033,7 +2296,7 @@
             ? "served from the share store — content-addressed and read-only; the editor holds the original"
             : "carried whole in the link you followed — no server held it"}</p>
       </header>`;
-    const blocks = doc.blocks.map(b => renderPaperBlock(b, mby, iby, tried))
+    const blocks = doc.blocks.map(b => renderPaperBlock(b, mby, iby, tried, aux))
       .filter(Boolean).join("");
     // a title-only paper is a sanctioned form — say what it is, not that its
     // (nonexistent) blocks were curated away
@@ -2046,8 +2309,23 @@
             added stories or reels yet. The <a href="${BASE}/">record
             itself</a> is one link up.</p>`));
   }
-  function renderPaperBlock(b, mby, iby, tried) {
+  function renderPaperBlock(b, mby, iby, tried, aux) {
     tried = tried || { m: new Set(), i: new Set() };
+    aux = aux || {};
+    if (b.kind === "note") {
+      const text = (b.text || "").trim();
+      // only the editor's own draft can hold an empty note (no traveling
+      // form carries one) — say what it is instead of rendering a void
+      if (!text) return `<section class="pb-note pb-note-empty">
+        <span class="kicker">the editor’s note</span>
+        <p class="hint">an empty note — write it in the studio panel</p></section>`;
+      const paras = text.split(/\n+/).map(s => `<p>${esc(s)}</p>`).join("");
+      // labeled out loud: a note is the one block that is the EDITOR's words,
+      // not the record's — a reader must never mistake the two
+      return `<section class="pb-note"><span class="kicker">the editor’s note</span>
+        ${paras}</section>`;
+    }
+    if (b.kind === "chart") return renderChartBlock(b, mby, iby, tried, aux);
     if (b.kind === "story" && b.story === "meeting") {
       const m = mby[b.pid];
       if (!m) return tried.m.has(b.pid)
@@ -2105,6 +2383,290 @@
     }
     return "";
   }
+  /* ---- the chart blocks (specs/21 P2) --------------------------------------
+     Four pictures, all computed HERE from the record's own pressed planes —
+     a paper carries which chart, never the numbers. They wear the paper
+     palette only: deep green is measurement (the analytics page's rule),
+     slate is label, and no studio hue exists on a rendered paper (§6.1).
+     Every chart keeps the two house rules the baked charts keep: a table
+     twin, and a receipt under every mark. Positional marks (votes, reach)
+     are SVG at natural size in a scrolling wrap so a mark never shrinks
+     below a finger; magnitude bars (framing, topics) are HTML rows — the
+     heatmap's precedent — so their labels stay real, wrappable, AA text at
+     every width. */
+  function chartShell(kicker, sub, body, twin, src) {
+    return `<section class="pb-chart">
+        <div class="sectionhead"><span class="kicker">${kicker}</span></div>
+        ${sub ? `<p class="pb-chartsub">${sub}</p>` : ""}
+        ${body}
+        ${twin ? `<details class="graphtwin"><summary>the same, as a table</summary>
+          <div class="pb-twinwrap"><table class="twin">${twin}</table></div></details>` : ""}
+        ${src ? `<p class="pb-chartsrc">${src}</p>` : ""}
+      </section>`;
+  }
+  /* a plane that did not arrive is "unreachable here", never "empty" — the
+     two are different facts and the reader is owed whichever is true */
+  const chartUnfetched = (kicker, html) => chartShell(kicker, "",
+    `<p class="pb-gone">${html}</p>`, "", "");
+  const chartDay = d => d ? esc(String(d).slice(5)) : "—";
+  function renderChartBlock(b, mby, iby, tried, aux) {
+    if (b.chart === "votes") return chartVotes(aux.votes);
+    if (b.chart === "topics") return chartTopics(aux.analytics);
+    if (b.chart === "framing" && !b.pid) return chartFramingRecord(aux.analytics);
+    if (b.chart === "framing") return chartFramingMeeting(b, mby, tried);
+    if (b.chart === "reach") return chartReach(b, iby, tried);
+    return "";
+  }
+  /* votes over time — every roll call the record holds, one dot each,
+     stacked by meeting: filled passes, hollow fails (shape, not color-alone,
+     and the twin says the word). Each dot opens the tape where the vote was
+     taken. */
+  function chartVotes(plane) {
+    const kicker = "votes over time — the record’s roll calls";
+    if (!plane)
+      return chartUnfetched(kicker, `the record’s votes plane didn’t load `
+        + `here — <a href="${BASE}/officials">who voted how</a> reads in place`);
+    const votes = plane.votes || [];
+    if (!votes.length)
+      return chartShell(kicker, "",
+        `<p class="hint">The record holds no roll calls yet — when a
+          meeting’s tape carries one, it lands here.</p>`, "", "");
+    const cols = [];
+    for (const v of votes) {
+      const last = cols[cols.length - 1];
+      if (last && last.pid === v.pid) last.votes.push(v);
+      else cols.push({ pid: v.pid, date: v.date || "", body: v.body || "", votes: [v] });
+    }
+    const colW = 56, pad = 10, dotR = 7, pitch = 19;
+    const maxN = Math.max(...cols.map(c => c.votes.length));
+    const plotH = maxN * pitch + 12;
+    const W = pad * 2 + cols.length * colW, H = plotH + 36;
+    let marks = "", labels = "", prevYear = null, hasOther = false;
+    cols.forEach((c, i) => {
+      const cx = r1(pad + i * colW + colW / 2);
+      c.votes.forEach((v, j) => {
+        const cy = r1(plotH - dotR - 2 - j * pitch);
+        // three marks, never a lie: a filled dot is "passes", a hollow dot
+        // is "fails", and any other outcome the record holds (tabled, tied,
+        // a desk import's own wording) is a half-tone square — the exact
+        // word rides the tooltip, the aria-label and the twin. Binarizing
+        // would draw a tabled motion as a failed one (a review catch).
+        const mark = v.outcome === "passes" ? "pass"
+          : v.outcome === "fails" ? "fail" : "other";
+        if (mark === "other") hasOther = true;
+        const tip = `${c.date || "undated"} · ${v.outcome}`
+          + (v.tally ? ` ${v.tally}` : "") + ` — ${v.motion || "(motion)"}`;
+        marks += `<a href="${BASE}/m/${esc(c.pid)}#t${Math.floor(v.t || 0)}"`
+          + ` aria-label="${esc(tip.slice(0, 140))}">`
+          + (mark === "other"
+            ? `<rect x="${r1(cx - dotR + 1)}" y="${r1(cy - dotR + 1)}" `
+              + `width="${(dotR - 1) * 2}" height="${(dotR - 1) * 2}" rx="2" `
+              + `fill="#052e16" fill-opacity=".5"`
+            : `<circle cx="${cx}" cy="${cy}" r="${dotR}" `
+              + (mark === "pass" ? `fill="#052e16" fill-opacity=".82"`
+                                 : `fill="#ffffff" stroke="#052e16" stroke-width="2"`))
+          + `><title>${esc(tip)}</title>`
+          + (mark === "other" ? `</rect></a>` : `</circle></a>`);
+      });
+      const y = c.date.slice(0, 4);
+      labels += `<text x="${cx}" y="${plotH + 14}" text-anchor="middle" `
+        + `font-size="10" fill="#475569">${chartDay(c.date)}</text>`;
+      if (y && y !== prevYear) {
+        labels += `<text x="${cx}" y="${plotH + 28}" text-anchor="middle" `
+          + `font-size="10" fill="#475569">${esc(y)}</text>`;
+        prevYear = y;
+      }
+    });
+    // role="group", NOT role="img": img flattens the subtree and every
+    // per-dot receipt link would vanish from assistive tech (a review catch)
+    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" `
+      + `xmlns="http://www.w3.org/2000/svg" role="group" aria-label="the `
+      + `record’s roll calls, meeting by meeting — ${votes.length} votes `
+      + `across ${plane.n_meetings} meetings; the table below carries every `
+      + `motion and outcome">`
+      + `<line x1="0" y1="${plotH + 0.5}" x2="${W}" y2="${plotH + 0.5}" `
+      + `stroke="#e2e8f0"/>` + marks + labels + `</svg>`;
+    const twin = `<thead><tr><th>date</th><th>motion</th><th>outcome</th>
+        <th>tally</th></tr></thead><tbody>`
+      + votes.map(v =>
+        `<tr><td><a href="${BASE}/m/${esc(v.pid)}#t${Math.floor(v.t || 0)}">
+           ${esc(v.date || "undated")}</a></td>
+         <td>${esc((v.motion || "").slice(0, 110))}</td>
+         <td>${esc(v.outcome || "")}</td><td>${esc(v.tally || "")}</td></tr>`)
+        .join("") + `</tbody>`;
+    return chartShell(kicker,
+      `${votes.length} roll call${votes.length > 1 ? "s" : ""} across `
+        + `${plane.n_meetings} meeting${plane.n_meetings > 1 ? "s" : ""} — `
+        + `every dot opens the tape where the vote was taken`,
+      `<div class="pb-chartwrap">${svg}</div>
+       <p class="pb-chartkey"><span class="pk-dot pk-full"></span> passes
+         <span class="pk-dot pk-hollow"></span> fails${hasOther
+           ? `\n         <span class="pk-dot pk-other"></span> other outcomes — the table has each word`
+           : ""}</p>`,
+      twin,
+      `counted from the record’s own roll calls —
+       <a href="${BASE}/officials">who voted how</a> holds every member’s record`);
+  }
+  /* an issue's reach — its appearances, meeting by meeting; a bar is how
+     many moments of that meeting the issue surfaced in. */
+  function chartReach(b, iby, tried) {
+    const it = iby[b.slug];
+    if (!it) return tried.i.has(b.slug)
+      ? paperGone(`an issue (${b.slug})`)
+      : paperBudget("an issue’s reach chart");
+    const kicker = `an issue’s reach — ${esc(it.name || b.slug)}`;
+    const tl = it.timeline || [];
+    if (!tl.length)
+      return chartShell(kicker, "",
+        `<p class="hint">The record hasn’t seen this issue surface in a
+          meeting yet.</p>`, "",
+        `from the record’s long view —
+         <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>`);
+    const barW = 34, gap = 14, pad = 10, plotH = 110;
+    const maxB = Math.max(...tl.map(n => (n.beads || []).length), 1);
+    const W = pad * 2 + tl.length * (barW + gap) - gap, H = plotH + 36;
+    let marks = "", labels = "", prevYear = null;
+    tl.forEach((n, i) => {
+      const x = r1(pad + i * (barW + gap));
+      const nb = (n.beads || []).length;
+      const h = nb ? Math.max(6, r1(nb * (plotH - 22) / maxB)) : 3;
+      const y = r1(plotH - h);
+      const t0 = nb ? Math.floor(n.beads[0].t || 0) : 0;
+      const tip = `${n.date || "undated"} · ${n.body || n.title || n.pid} — `
+        + `${nb} moment${nb === 1 ? "" : "s"}`;
+      marks += `<a href="${BASE}/m/${esc(n.pid)}${nb ? `#t${t0}` : ""}"`
+        + ` aria-label="${esc(tip)}">`
+        + `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="2" `
+        + `fill="#052e16" fill-opacity="${nb ? ".82" : ".35"}">`
+        + `<title>${esc(tip)}</title></rect></a>`
+        + `<text x="${r1(x + barW / 2)}" y="${y - 5}" text-anchor="middle" `
+        + `font-size="11" fill="#0f172a">${nb}</text>`;
+      const yr = (n.date || "").slice(0, 4);
+      labels += `<text x="${r1(x + barW / 2)}" y="${plotH + 14}" `
+        + `text-anchor="middle" font-size="10" fill="#475569">${chartDay(n.date)}</text>`;
+      if (yr && yr !== prevYear) {
+        labels += `<text x="${r1(x + barW / 2)}" y="${plotH + 28}" `
+          + `text-anchor="middle" font-size="10" fill="#475569">${esc(yr)}</text>`;
+        prevYear = yr;
+      }
+    });
+    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" `
+      + `xmlns="http://www.w3.org/2000/svg" role="group" aria-label="`
+      + `${esc(it.name || b.slug)} — appearances meeting by meeting; the `
+      + `table below carries the same counts">`
+      + `<line x1="0" y1="${plotH + 0.5}" x2="${W}" y2="${plotH + 0.5}" `
+      + `stroke="#e2e8f0"/>` + marks + labels + `</svg>`;
+    const twin = `<thead><tr><th>date</th><th>meeting</th><th>moments</th>
+        </tr></thead><tbody>`
+      + tl.map(n => `<tr><td><a href="${BASE}/m/${esc(n.pid)}">
+          ${esc(n.date || "undated")}</a></td>
+          <td>${esc(n.body || n.title || n.pid)}</td>
+          <td>${(n.beads || []).length}</td></tr>`).join("") + `</tbody>`;
+    return chartShell(kicker,
+      `${it.n_meetings} meeting${it.n_meetings === 1 ? "" : "s"}`
+        + (it.first_seen ? ` · first seen ${esc(it.first_seen)}` : "")
+        + (it.last_seen ? ` · last ${esc(it.last_seen)}` : ""),
+      `<div class="pb-chartwrap">${svg}</div>`,
+      twin,
+      `from the record’s long view —
+       <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>
+       holds every appearance in place`);
+  }
+  /* magnitude bars in HTML — the heatmap's precedent: real text labels (AA
+     at any width), an inline width that is the measurement, deep green the
+     only hue. Used by both framing charts and topics. */
+  function lensBars(rows) {
+    const mx = Math.max(...rows.map(r => r.n), 1);
+    return `<div class="pb-bars">` + rows.map(r => {
+      const name = r.href
+        ? `<a class="pb-name" href="${esc(r.href)}" title="${esc(r.name)}">${esc(r.name)}</a>`
+        : `<span class="pb-name" title="${esc(r.name)}">${esc(r.name)}</span>`;
+      return `<div class="pb-bar">${name}
+        <span class="pb-track" aria-hidden="true"><span class="pb-fill"
+          style="width:${Math.max(1.5, 100 * r.n / mx).toFixed(1)}%"></span></span>
+        <span class="pb-n">${esc(r.meta || String(r.n))}</span></div>`;
+    }).join("") + `</div>`;
+  }
+  function chartFramingMeeting(b, mby, tried) {
+    const m = mby[b.pid];
+    if (!m) return tried.m.has(b.pid)
+      ? paperGone(`a meeting (${b.pid})`)
+      : paperBudget("a framing chart");
+    const kicker = `the framing lenses — ${esc(m.title || b.pid)}`;
+    const fr = (m.analysis || {}).framing || {};
+    const lenses = (fr.lenses || []).slice().sort((a, x) => x.count - a.count);
+    if (!lenses.length)
+      return chartShell(kicker, "",
+        `<p class="hint">The analyzer read no framing signals in this
+          meeting.</p>`, "",
+        `from the record’s read of
+         <a href="${BASE}/m/${esc(b.pid)}">this meeting</a>`);
+    const twin = `<thead><tr><th>lens</th><th>signals</th><th>share</th>
+        </tr></thead><tbody>`
+      + lenses.map(l => `<tr><td>${esc(l.lens)}</td><td>${l.count || 0}</td>
+          <td>${Math.round((l.share || 0) * 100)}%</td></tr>`).join("")
+      + `</tbody>`;
+    return chartShell(kicker,
+      `how this meeting framed what it discussed —
+       ${fr.total || 0} signals, counted from its own words`,
+      lensBars(lenses.map(l => ({ name: l.lens, n: l.count || 0 }))),
+      twin,
+      `counted from the record’s read of
+       <a href="${BASE}/m/${esc(b.pid)}">this meeting</a>`);
+  }
+  function chartFramingRecord(analytics) {
+    const kicker = "the framing lenses — the whole record";
+    if (!analytics)
+      return chartUnfetched(kicker, `the record’s analytics plane didn’t load `
+        + `here — <a href="${BASE}/analytics">the record, drawn</a> reads in place`);
+    const order = analytics.lens_order || [];
+    const totals = order.map(nm => ({ name: nm,
+      n: (analytics.framing || []).reduce((s, r) => s + ((r.lenses || {})[nm] || 0), 0) }));
+    totals.sort((a, x) => x.n - a.n);
+    if (!totals.length || !totals.some(t => t.n))
+      return chartShell(kicker, "",
+        `<p class="hint">The framing map needs a read meeting.</p>`, "",
+        `from <a href="${BASE}/analytics">the record, drawn</a>`);
+    const twin = `<thead><tr><th>lens</th><th>signals</th></tr></thead><tbody>`
+      + totals.map(t => `<tr><td>${esc(t.name)}</td><td>${t.n}</td></tr>`)
+        .join("") + `</tbody>`;
+    return chartShell(kicker,
+      `how the record frames its talk, across ${analytics.n_meetings || 0}
+       meeting${analytics.n_meetings === 1 ? "" : "s"}`,
+      lensBars(totals),
+      twin,
+      `counted from <a href="${BASE}/analytics">the record, drawn</a> —
+       the full meeting-by-meeting map reads there`);
+  }
+  function chartTopics(analytics) {
+    const kicker = "recurring topics — what keeps coming back";
+    if (!analytics)
+      return chartUnfetched(kicker, `the record’s analytics plane didn’t load `
+        + `here — <a href="${BASE}/analytics">the record, drawn</a> reads in place`);
+    const tops = (analytics.topics || []).slice(0, 12);
+    if (!tops.length)
+      return chartShell(kicker, "",
+        `<p class="hint">Nothing recurs yet — the record is young.</p>`, "",
+        `from <a href="${BASE}/analytics">the record, drawn</a>`);
+    const rows = tops.map(t => ({
+      name: t.topic, n: (t.meetings || []).length,
+      meta: `${(t.meetings || []).length} meeting${(t.meetings || []).length === 1 ? "" : "s"} · ${t.count}×`,
+      href: t.meetings && t.meetings.length
+        ? `${BASE}/m/${t.meetings[0].pid}#t${Math.floor(t.meetings[0].t || 0)}`
+        : "" }));
+    const twin = `<thead><tr><th>topic</th><th>meetings</th><th>mentions</th>
+        </tr></thead><tbody>`
+      + tops.map(t => `<tr><td>${esc(t.topic)}</td>
+          <td>${(t.meetings || []).length}</td><td>${t.count}</td></tr>`)
+        .join("") + `</tbody>`;
+    return chartShell(kicker,
+      `the top ${tops.length} by meetings touched — a longer bar keeps
+       returning`,
+      lensBars(rows),
+      twin,
+      `counted from <a href="${BASE}/analytics">the record, drawn</a>`);
+  }
+
   const paperGone = what => `<p class="pb-gone">This paper cites ${esc(what)} `
     + `that isn’t in this pressing of the record — it may have been curated `
     + `away, or pressed under a different id.</p>`;

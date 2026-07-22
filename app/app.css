@@ -453,6 +453,50 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   background:var(--tint-1);border:var(--border-w) dashed var(--border-strong);
   border-radius:var(--radius-sm);padding:var(--space-3);margin:0 0 var(--space-3)}
 
+/* /app/p — P2: the editor's own words, and charts computed from the planes.
+   Still the quiet palette on purpose: deep green is measurement (the
+   analytics page's rule), slate is label, and no studio hue reaches a
+   rendered paper (§6.1 — the bound is scoped by construction). */
+.pb-note{margin:var(--space-5) 0;padding:var(--space-3) var(--space-4);
+  background:var(--tint-1);border-left:3px solid var(--accent);
+  border-radius:var(--radius-sm)}
+.pb-note .kicker{display:block;margin-bottom:var(--space-2)}
+.pb-note p{margin:0 0 var(--space-2);max-width:66ch;overflow-wrap:break-word}
+.pb-note p:last-child{margin-bottom:0}
+.pb-note-empty{border-left-style:dashed}
+.pb-chart{margin:var(--space-5) 0}
+.pb-chartsub{font-size:var(--text-sm);color:var(--text-secondary);
+  margin:var(--space-2) 0 var(--space-3);max-width:66ch}
+.pb-chartwrap{overflow-x:auto;padding-bottom:var(--space-1)}
+.pb-chartwrap svg{display:block}
+.pb-chartkey{display:flex;align-items:center;gap:var(--space-2);
+  font:var(--weight-medium) var(--text-xs)/1 var(--font-mono);
+  color:var(--text-secondary);margin:var(--space-2) 0 0}
+.pk-dot{display:inline-block;width:10px;height:10px;border-radius:50%;
+  margin-right:2px}
+.pk-full{background:var(--accent)}
+.pk-hollow{background:var(--surface-card);border:2px solid var(--accent);
+  box-sizing:border-box}
+.pk-other{background:var(--accent);opacity:.5;border-radius:3px}
+.pb-twinwrap{overflow-x:auto}
+.pb-chartsrc{font-size:var(--text-xs);color:var(--text-secondary);
+  margin:var(--space-2) 0 0}
+/* magnitude bars in HTML — labels stay real text at every width. (pb-bar,
+   NOT .lensbar: the meeting page already owns that name for its 9px inline
+   pill, and a later same-specificity rule would squash these rows.) */
+.pb-bars{display:grid;gap:7px;margin:var(--space-2) 0}
+.pb-bar{display:grid;grid-template-columns:minmax(88px,150px) 1fr max-content;
+  gap:var(--space-2);align-items:center;font-size:var(--text-xs)}
+.pb-bar .pb-name{color:var(--text-secondary);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;text-decoration:none}
+.pb-bar a.pb-name:hover{color:var(--accent);text-decoration:underline}
+.pb-bar .pb-track{height:12px;background:var(--tint-1);
+  border-radius:var(--radius-sm);overflow:hidden}
+.pb-bar .pb-fill{display:block;height:100%;background:var(--accent);
+  opacity:.82;border-radius:var(--radius-sm)}
+.pb-bar .pb-n{font-family:var(--font-mono);color:var(--text-primary);
+  white-space:nowrap}
+
 /* /app/ai — the AI constitution. The record's quiet register throughout:
    neutrals + deep green, native interactivity (details/summary), the same
    card grammar as the covenant. Nothing here is louder than the paper. */
@@ -979,6 +1023,29 @@ html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
 .cz-padds{margin:var(--space-2) 0 0}
 .cz-pshare{margin-top:var(--space-3)}
 .cz-padds .btn,.cz-pshare .btn{font-size:var(--text-xs)}
+/* a note's field sits under its row — same typing rules as the title
+   (16px so iOS never zooms the drawer on focus) */
+.cz-pnote{width:100%;box-sizing:border-box;resize:vertical;min-height:64px;
+  font:var(--weight-regular) 16px/1.45 var(--font-sans);
+  color:var(--text-primary);background:var(--surface-card);
+  border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);
+  padding:7px 9px;margin:-2px 0 var(--space-2)}
+.cz-pnote::placeholder{color:var(--text-secondary)}
+.cz-pnote:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+/* the chart menu — quiet until opened; its summary reads as a button */
+.cz-chartadd{display:inline-block}
+.cz-chartadd summary{list-style:none;cursor:pointer;display:inline-block}
+.cz-chartadd summary::-webkit-details-marker{display:none}
+.cz-chartadd summary{font-size:var(--text-xs);font-family:var(--font-mono);
+  font-weight:var(--weight-medium);color:var(--text-primary);
+  background:var(--surface-card);border:var(--border-w) solid var(--border-strong);
+  border-radius:var(--radius-sm);padding:6px 10px}
+.cz-chartadd summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.cz-chartadd[open] summary{border-color:var(--studio-accent-text, var(--accent))}
+.cz-chartmenu{display:flex;flex-wrap:wrap;gap:var(--space-2);
+  margin-top:var(--space-2);padding:var(--space-2);
+  border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm)}
+.cz-chartmenu .btn{font-size:var(--text-xs)}
 .cz-pshort-out{font:var(--weight-medium) var(--text-xs)/1.5 var(--font-mono);
   color:var(--text-secondary);margin:var(--space-2) 0 0;overflow-wrap:anywhere}
 .cz-pshort-out a{color:var(--studio-accent-text, var(--accent))}
