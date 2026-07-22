@@ -268,6 +268,17 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm);
   border-left:var(--border-w-strong) solid var(--accent)}
 .vteaser:hover{background:var(--tint-1)}
+/* one quiet line, after everything the record itself has to say: the papers
+   the press built (specs/21 P3) — the folio's register, no card, no color */
+.featline{font-family:var(--font-mono);font-size:var(--text-xs);
+  color:var(--text-secondary);margin:var(--space-6) 0 0;
+  border-top:var(--border-w) solid var(--border-hairline);
+  padding-top:var(--space-3);line-height:var(--leading-body)}
+/* links in prose distinguish themselves by more than color (G183: ink vs
+   slate is 2.36:1) — the underline is the affordance */
+.featline a{color:var(--text-primary);text-decoration:underline;
+  text-underline-offset:2px}
+.featline a:hover{color:var(--accent)}
 .vt-motion{display:block;font-size:var(--text-sm);color:var(--text-primary)}
 .vt-meta{display:block;font-family:var(--font-mono);font-size:var(--text-xs);
   color:var(--text-secondary);margin-top:3px}
@@ -496,6 +507,30 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   opacity:.82;border-radius:var(--radius-sm)}
 .pb-bar .pb-n{font-family:var(--font-mono);color:var(--text-primary);
   white-space:nowrap}
+
+/* /app/p — the featured papers (specs/21 P3): the empty state's front door.
+   Pressed at press time as plain links, rendered outside #paperbody, hidden
+   by the renderer the moment a real paper stands. The paper palette only —
+   mcard's register, and not one studio hue (§6.1). */
+.pfeat{margin:var(--space-6) 0 0}
+.pf-lede{font-size:var(--text-sm);color:var(--text-secondary);max-width:60ch;
+  margin:var(--space-2) 0 var(--space-3)}
+.pf-cards{display:grid;gap:var(--space-3);
+  grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.pf-card{display:block;background:var(--surface-card);
+  border:var(--border-w) solid var(--border-hairline);
+  border-left:var(--border-w-strong) solid var(--accent);
+  border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);
+  text-decoration:none;color:var(--text-primary)}
+.pf-card b{display:block;font-family:var(--font-mono);font-size:var(--text-base);
+  margin-bottom:var(--space-1)}
+.pf-card:hover b{color:var(--accent);text-decoration:underline}
+/* no :focus-visible rule of its own: the pressed :root emits no --focus-ring,
+   and a more-specific rule naming it would resolve to outline:none and kill
+   the working global ring (the studio block's own documented trap) — the
+   global :focus-visible var(--state) ring covers these cards */
+.pf-sub{display:block;font-size:var(--text-xs);color:var(--text-secondary);
+  line-height:var(--leading-body)}
 
 /* /app/ai — the AI constitution. The record's quiet register throughout:
    neutrals + deep green, native interactivity (details/summary), the same
@@ -937,7 +972,8 @@ html.cz-m-studio.cz-rail .cz-modes{display:none}
 .cz-mode:focus-visible,.cz-enter:focus-visible,.cz-hide:focus-visible,
 .cz-tab:focus-visible,.cz-rail-btn:focus-visible,.cz-pill-reel:focus-visible,
 .cz-reelacts .btn:focus-visible,.cz-ptitle:focus-visible,.cz-pact:focus-visible,
-.cz-padds .btn:focus-visible,.cz-pshare .btn:focus-visible{
+.cz-padds .btn:focus-visible,.cz-pshare .btn:focus-visible,
+.cz-tpls .btn:focus-visible{
   outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
 
 /* --- preview: the pill --- */
@@ -973,7 +1009,7 @@ html.cz-m-studio.cz-rail .cz-head{margin:0;justify-content:center}
   border:0;cursor:pointer}
 .cz-mode+.cz-mode{border-left:var(--border-w) solid var(--border-hairline)}
 .cz-mode:hover{color:var(--text-primary)}
-.cz-mode[aria-pressed="true"]{background:var(--studio-accent-text, var(--accent));
+.cz-mode[aria-checked="true"]{background:var(--studio-accent-text, var(--accent));
   color:var(--text-inverse)}
 .cz-rail-btn{margin-left:auto;font:var(--weight-bold) var(--text-md)/1 var(--font-mono);
   background:none;border:0;color:var(--text-secondary);cursor:pointer;padding:2px 6px}
@@ -1031,7 +1067,7 @@ html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
   border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);
   padding:7px 9px;margin:-2px 0 var(--space-2)}
 .cz-pnote::placeholder{color:var(--text-secondary)}
-.cz-pnote:focus-visible{outline:2px solid var(--focus-ring);outline-offset:1px}
+.cz-pnote:focus-visible{outline:2px solid var(--focus-ring, var(--state));outline-offset:1px}
 /* the chart menu — quiet until opened; its summary reads as a button */
 .cz-chartadd{display:inline-block}
 .cz-chartadd summary{list-style:none;cursor:pointer;display:inline-block}
@@ -1040,11 +1076,19 @@ html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
   font-weight:var(--weight-medium);color:var(--text-primary);
   background:var(--surface-card);border:var(--border-w) solid var(--border-strong);
   border-radius:var(--radius-sm);padding:6px 10px}
-.cz-chartadd summary:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.cz-chartadd summary:focus-visible{outline:2px solid var(--focus-ring, var(--state));outline-offset:2px}
 .cz-chartadd[open] summary{border-color:var(--studio-accent-text, var(--accent))}
 .cz-chartmenu{display:flex;flex-wrap:wrap;gap:var(--space-2);
   margin-top:var(--space-2);padding:var(--space-2);
   border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm)}
+/* templates (P3) — a starting shape, offered only while the draft is empty.
+   The head speaks in cz-tag's register; the buttons are the panel's own. */
+.cz-tpls{display:flex;flex-wrap:wrap;gap:var(--space-2);
+  margin:var(--space-3) 0 0}
+.cz-tplhead{flex:0 0 100%;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  letter-spacing:var(--tracking-label);text-transform:uppercase;
+  color:var(--text-secondary)}
+.cz-tpls .btn{font-size:var(--text-xs)}
 .cz-chartmenu .btn{font-size:var(--text-xs)}
 .cz-pshort-out{font:var(--weight-medium) var(--text-xs)/1.5 var(--font-mono);
   color:var(--text-secondary);margin:var(--space-2) 0 0;overflow-wrap:anywhere}

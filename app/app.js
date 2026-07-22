@@ -148,9 +148,24 @@
     MODES.forEach(x => el.classList.toggle("cz-m-" + x, x === m));
     el.classList.toggle("cz-rail", m === "studio" && readRail());
   }
+  /* the mode THIS page is showing: the html class markMode painted (the one
+     writer), falling back to storage. In a storage-blocked browser
+     readMode() answers "preview" while the page visibly sits in the studio —
+     the control's checked state and its arrows must speak about what the
+     reader sees, not what a refused write left behind (a review catch). */
+  const shownMode = () => MODES.find(m =>
+    document.documentElement.classList.contains("cz-m-" + m)) || readMode();
+  // the rail's painted truth, for the same reason — and doubly so: deriving
+  // the NEXT rail state from storage in a blocked browser would pin the
+  // toggle (collapse once, never expand), which is worse than dead
+  const shownRail = () => document.documentElement.classList.contains("cz-rail");
 
+  /* the mode control is a real radiogroup (P3): one choice of three, arrow
+     keys move it, and only the checked radio sits in the tab order (roving
+     tabindex) — so the whole control costs a keyboard one stop, not three.
+     The buttons stay <button>s: Enter/Space keep their native press. */
   const modeBtn = (m, label, title) =>
-    `<button type="button" class="cz-mode" data-mode="${m}" title="${esc(title)}" aria-pressed="false">${esc(label)}</button>`;
+    `<button type="button" class="cz-mode" data-mode="${m}" role="radio" title="${esc(title)}" aria-checked="false" tabindex="-1">${esc(label)}</button>`;
   /* Three presentations, one <aside>, chosen by the mode class on <html>:
      · paper   — a quiet edge tab (◐ studio), so the reader who hid the studio
                  can bring it back; it blocks nothing.
@@ -161,7 +176,7 @@
      · studio  — the full sidebar, with the mode control, the collapse handle,
                  and the reel + paper panels. */
   function studioMarkup() {
-    const modes = `<div class="cz-modes" role="group" aria-label="how much studio to show">`
+    const modes = `<div class="cz-modes" role="radiogroup" aria-label="how much studio to show">`
       + modeBtn("preview", "preview", "a compact preview")
       + modeBtn("studio", "studio", "the full editor")
       + modeBtn("paper", "paper", "just the paper — the quiet reader")
@@ -236,6 +251,24 @@
   function wireStudio() {
     if (!STUDIO) return;
     $$(".cz-mode", STUDIO).forEach(b => b.onclick = () => setMode(b.dataset.mode));
+    // the radiogroup contract: arrows move the choice (selection follows
+    // focus, the radio idiom), Home/End jump to the poles. Picking a
+    // non-studio mode hides this group — setMode's focus handling already
+    // lands the keyboard on the control the new mode shows.
+    const grp = $(".cz-modes", STUDIO);
+    if (grp) grp.addEventListener("keydown", e => {
+      // modified chords belong to the browser and to AT (Alt+Left is back) —
+      // only the plain keys are the radiogroup's to take
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+      const to = step
+        ? MODES[(MODES.indexOf(shownMode()) + step + MODES.length) % MODES.length]
+        : e.key === "Home" ? MODES[0]
+        : e.key === "End" ? MODES[MODES.length - 1] : "";
+      if (!to) return;
+      e.preventDefault();
+      setMode(to);
+    });
     // the explicit "enter" always opens the full sidebar, even for a reader whose
     // last studio visit left it collapsed to a rail
     const enter = $(".cz-enter", STUDIO);
@@ -257,6 +290,7 @@
       else if (act === "preel") addReelToPaper();
       else if (act === "pnote") addNoteToPaper();
       else if (act === "pchart") addChartToPaper(b.dataset.chart, b.dataset.ref || "");
+      else if (act === "ptpl") applyPaperTemplate(b.dataset.tpl);
       else if (act === "pup" || act === "pdown" || act === "pdel")
         movePaperBlock(+b.dataset.i, act);
       else if (act === "plink") copyText(paperShareURL(readPaper()),
@@ -288,19 +322,28 @@
     if (el && typeof el.focus === "function") el.focus();
   }
   function toggleRail() {
-    const v = !readRail(); writeRail(v);
-    document.documentElement.classList.toggle("cz-rail", readMode() === "studio" && v);
+    // painted truth on both axes (the re-review's catch: the fold converted
+    // two of the three studio-state readers and left this one lying) — the
+    // stored preference is still written for the next load, when it can be
+    const v = !shownRail(); writeRail(v);
+    document.documentElement.classList.toggle("cz-rail", shownMode() === "studio" && v);
     updateModeButtons();
   }
   function updateModeButtons() {
-    const m = readMode();
-    $$(".cz-mode", STUDIO || document).forEach(b =>
-      b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"));
+    const m = shownMode();
+    // aria-checked + roving tabindex: the checked radio is the group's one
+    // tab stop; the rest are arrow-reachable (updateModeButtons runs before
+    // setMode hands focus over, so the stop exists by the time focus moves)
+    $$(".cz-mode", STUDIO || document).forEach(b => {
+      const on = b.dataset.mode === m;
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      b.tabIndex = on ? 0 : -1;
+    });
     // the collapse handle's glyph AND its label track the stored state, so a
     // page that loads with the sidebar already collapsed reads "expand", not the
     // stale "collapse" baked into the markup
     const b = $(".cz-rail-btn", STUDIO);
-    if (b) { const railed = readRail(); b.textContent = railed ? "›" : "‹";
+    if (b) { const railed = shownRail(); b.textContent = railed ? "›" : "‹";
       b.title = railed ? "expand the studio" : "collapse the studio";
       b.setAttribute("aria-label", b.title); }
   }
@@ -434,6 +477,19 @@
       ? `<p class="cz-pshort-out">short link:
            <a href="${esc(PAPER_SHORT)}">${esc(PAPER_SHORT.replace(location.origin, ""))}</a></p>`
       : "";
+    /* templates (P3): pre-shaped papers, offered only while the WHOLE draft
+       is empty (no title, no blocks) — a starting shape, never a thing that
+       could sit beside real work. The apply re-checks emptiness at the
+       click and confirms before replacing anything (another tab may have
+       typed meanwhile). Client-side only: a template just writes the draft. */
+    const tplBtn = (t, label) =>
+      `<button type="button" class="btn" data-cz="ptpl" data-tpl="${t}">${esc(label)}</button>`;
+    const tpls = (n || p.title) ? "" :
+        `<div class="cz-tpls"><span class="cz-tplhead">or start from a shape</span>`
+      + tplBtn("rolls", "the roll calls, watched")
+      + (ref && ref.story === "issue" ? tplBtn("issue", "this issue, watched") : "")
+      + (ref && ref.story === "meeting" ? tplBtn("meeting", "this meeting, covered") : "")
+      + `</div>`;
     el.innerHTML =
         `<input class="cz-ptitle" type="text" maxlength="200"
            placeholder="name your paper" aria-label="your paper’s title"
@@ -442,6 +498,7 @@
       + (n ? "" : `<p class="cz-hint">Your paper starts empty. Add the meeting
            or issue you’re reading, or your reel — arrange the blocks, title
            it, share it as your own front page.</p>`)
+      + tpls
       + (adds ? `<div class="cz-padds">${adds}</div>` : "")
       + share + shortOut;
     // typing must not repaint the panel under the caret — the title saves on
@@ -2048,6 +2105,51 @@
     refreshPaperSummary(); schedulePaperRender();
     toast("chart added — it draws from the record when your paper renders");
   }
+  /* a template (P3): a pre-shaped paper the editor starts from — the same
+     blocks the panel's own buttons add, written in one press, client-side
+     only. The panel offers them only on an empty draft; the re-check here
+     is for the draft that grew between paint and press (another tab, a
+     storage race) — a template never replaces work without asking. The
+     note joins empty on purpose: a template may shape a paper, but the
+     editor's words are the editor's to write. */
+  async function applyPaperTemplate(t) {
+    const ref = pageStoryRef();
+    let title = "", blocks = [];
+    if (t === "rolls") {
+      title = "the roll calls, watched";
+      blocks = [{ kind: "chart", chart: "votes" },
+                { kind: "chart", chart: "framing" },
+                { kind: "note", text: "" }];
+    } else if (t === "issue" && ref && ref.story === "issue") {
+      const it = await getJSON(`${BASE}/issues/${encodeURIComponent(ref.slug)}.json`) || {};
+      title = `${it.name || ref.slug}, watched`;
+      blocks = [{ kind: "story", story: "issue", slug: ref.slug,
+                  name: it.name || "", n_meetings: it.n_meetings,
+                  first_seen: it.first_seen || "", last_seen: it.last_seen || "" },
+                { kind: "chart", chart: "reach", slug: ref.slug, name: it.name || "" },
+                { kind: "note", text: "" }];
+    } else if (t === "meeting" && ref && ref.story === "meeting") {
+      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(ref.pid)}.json`) || {};
+      title = `${m.title || ref.pid}, covered`;
+      blocks = [{ kind: "story", story: "meeting", pid: ref.pid,
+                  title: m.title || "", date: m.date || "", body: m.body || "",
+                  town: m.town || "", thumb: m.thumb || "" },
+                { kind: "chart", chart: "framing", pid: ref.pid, title: m.title || "" },
+                { kind: "note", text: "" }];
+    } else return;
+    // the fetch awaited — re-read, and never overwrite silently
+    const cur = readPaper();
+    if ((cur.title || cur.blocks.length)
+        && !window.confirm("Start from this template? Your current draft "
+                           + "will be replaced.")) return;
+    const p = normalizePaper({ title, blocks });
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    // focus lands in the fresh note: the one block a template cannot write
+    refreshPaperSummary({ act: "note", i: p.blocks.length - 1 });
+    schedulePaperRender();
+    toast("a paper, pre-shaped — the note is yours to write");
+  }
   function clearPaper() {
     try { localStorage.removeItem(PAPER_KEY); } catch { /* private mode */ }
     retireShortOut();   // removeItem bypasses savePaper — retire here too
@@ -2219,6 +2321,14 @@
   }
   async function paper() {
     const el = $("#paperbody"); if (!el) return;
+    /* the featured papers (P3) are pressed into the stub OUTSIDE this
+       renderer's node — server-rendered links, the record's own examples.
+       They belong to the empty state only: any paper that actually renders
+       (or any message about one that was asked for) retires them, and an
+       emptied draft brings them back. */
+    const feat = $("#pfeat");
+    const showFeat = v => { if (feat) feat.hidden = !v; };
+    showFeat(false);
     const gen = ++PAPER_GEN;
     const st = decodePaper(location.search);
     if (st.v && !PAPER_VS.includes(st.v))
@@ -2251,12 +2361,14 @@
       // on an empty draft must still repaint as the paper takes shape in the
       // panel beside it (four review lenses caught this one).
       PAPER_DRAFT_PAGE = true;
-      if (!doc.blocks.length && !doc.title)
+      if (!doc.blocks.length && !doc.title) {
+        showFeat(true);   // the one state the pressed examples belong to
         return paperMessage(el, "No paper here yet — this page renders one "
           + "when a link carries it, or shows your own draft. Enter the "
           + `studio on any page of <a href="${BASE}/">the record</a>, add `
           + "the stories and reels that matter to you, and your paper takes "
           + "shape here.");
+      }
     }
     PAPER_DRAFT_PAGE = from === "draft";
     document.title = `${doc.title || "A paper"} — publicrecord.studio`;
