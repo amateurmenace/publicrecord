@@ -183,7 +183,7 @@
       + `</div>`;
     return `<button type="button" class="cz-tab" title="open the studio">◐ studio</button>
       <div class="cz-pill">
-        <button type="button" class="cz-enter">✎ Enter the studio →</button>
+        <button type="button" class="cz-enter" title="open your paper in the studio">✎ Your paper — edit</button>
         <a class="cz-pill-reel" hidden></a>
         <button type="button" class="cz-hide" title="just the paper"
                 aria-label="hide the studio — just the paper">✕</button>
@@ -227,7 +227,7 @@
     wireStudio();
     updateModeButtons();
     refreshReelSummary();
-    refreshPaperSummary();
+    refreshPaperSummary();   // paints the card affordances too (A2)
     // another tab that ticks a moment (or edits the paper, or clears either)
     // writes a shared key; reflect it here without a reload. When THIS page is
     // also composing, the tray and ticks must move together with the summary,
@@ -304,6 +304,14 @@
   function setMode(m) {
     if (!MODES.includes(m)) m = "preview";
     writeMode(m); markMode(m); updateModeButtons();
+    // the make-affordances on the record's cards follow the mode (never in
+    // paper), and /app/p reading its own draft becomes — or stops being —
+    // the editor (specs/23 A2/A3)
+    paintMakeAffordances();
+    // entering the studio can wait for the debounce; LEAVING it repaints at
+    // once, or the editor's chrome stands on the page unstyled (its rules
+    // live under html.cz-m-studio) until the timer fires (a review catch)
+    if (m === "studio") schedulePaperRender(); else renderPaperNow();
     // keyboard focus must not fall to <body> when the control the reader was on
     // is display:none'd by the switch — land it on a control the new mode shows.
     focusModeControl(m);
@@ -395,8 +403,20 @@
     : b.chart === "reach" ? `▤ reach — ${b.name || b.slug}`
     : b.pid ? `▤ framing — ${b.title || b.pid}`
     : "▤ framing — the whole record";
+  /* one name per block, shared by the panel's rows and the page editor's
+     bars (A3) so the two surfaces never call a block two things */
+  const blockLabel = b => b.kind === "reel"
+      ? `▶ a reel — ${b.clips.length} clip${b.clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(b.clips))}`
+    : b.kind === "note"
+      ? `✎ a note${b.text.trim() ? " — " + b.text.trim().slice(0, 40) : ""}`
+    : b.kind === "chart" ? chartRowLabel(b)
+    : b.story === "issue" ? `◈ ${b.name || b.slug}`
+    : `§ ${b.title || b.pid}`;
   function refreshPaperSummary(focus) {
     if (!STUDIO) return;
+    // every paper change repaints the ✓ on the record's cards (A2) — the
+    // panel is the one hub every add, remove, arrange and clear passes through
+    paintMakeAffordances();
     const el = $(".cz-paperbody", STUDIO); if (!el) return;
     const p = readPaper();
     const n = p.blocks.length;
@@ -413,13 +433,7 @@
         focus = { act: "note", i: +ae.dataset.i, caret: ae.selectionStart };
     }
     const rows = p.blocks.map((b, i) => {
-      const label = b.kind === "reel"
-        ? `▶ a reel — ${b.clips.length} clip${b.clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(b.clips))}`
-        : b.kind === "note"
-          ? `✎ a note${b.text.trim() ? " — " + b.text.trim().slice(0, 40) : ""}`
-        : b.kind === "chart" ? chartRowLabel(b)
-        : b.story === "issue" ? `◈ ${b.name || b.slug}`
-        : `§ ${b.title || b.pid}`;
+      const label = blockLabel(b);
       return `<div class="cz-prow" data-i="${i}">
         <span class="cz-plabel" tabindex="-1" title="${esc(label)}">${esc(label)}</span>
         <span class="cz-pacts">
@@ -561,6 +575,87 @@
       }
     }
   }
+  /* ---- "＋ your paper" on the record's own cards (specs/23 A2) -------------
+     The making half was invisible: one corner pill carried it. Now every
+     meeting and issue card the record presses (the front page's lead, briefs,
+     long view and updates; an issue's timeline) grows a small affordance in
+     preview and studio modes — press it and the story joins your paper
+     without leaving the page; press again and it leaves. Script-added, never
+     baked (the byte-clean guard proves it), and never painted in paper mode:
+     the resident who hid the studio sees exactly the specs/20 paper.
+
+     The cards are whole-card <a>s, and a button may not live inside a link
+     (interactive content in interactive content — invalid, and a screen
+     reader hears a muddle). So each card is wrapped ONCE in a flex row with
+     the button beside it; the card itself, its classes and its data-town are
+     untouched, so the scope filter keeps finding it (and hides the row with
+     it). An issue page's timeline head is a centred stack of spans — the
+     button joins it as one more line. The label is the painted truth ("＋ your
+     paper" / "✓ in your paper"), never a stored guess. */
+  const MK_SEL = 'a.mcard[href^="/app/m/"], a.lrow[href^="/app/i/"], '
+               + 'a.rsrow[href^="/app/i/"], article.lead';
+  function cardStoryRef(el) {
+    const a = el.matches("a") ? el : el.querySelector("a.lead-hl");
+    const href = a ? (a.getAttribute("href") || "") : "";
+    let m = /^\/app\/m\/([\w-]+)$/.exec(href);
+    if (m) return { story: "meeting", pid: m[1] };
+    m = /^\/app\/i\/([\w-]+)$/.exec(href);
+    if (m) return { story: "issue", slug: m[1] };
+    return null;
+  }
+  const storyIndex = (p, ref) => p.blocks.findIndex(b => b.kind === "story"
+    && (ref.story === "meeting"
+      ? b.story === "meeting" && b.pid === ref.pid
+      : b.story === "issue" && b.slug === ref.slug));
+  function paintMakeAffordances() {
+    // never in paper mode — the button is removed from the painted page, not
+    // merely styled away, so what a control says and what the reader sees
+    // cannot disagree (the CSS rule is belt to this brace)
+    const hide = shownMode() === "paper";
+    const p = readPaper();
+    $$(MK_SEL).forEach(card => {
+      // a rendered paper's own story cards are the editor's blocks (A3),
+      // not the record's rails; the studio's panel is never a card
+      if (card.closest("#paperbody") || card.closest(".cz-studio")) return;
+      const ref = cardStoryRef(card); if (!ref) return;
+      let wrap = card.parentElement;
+      if (!(wrap && wrap.classList.contains("cz-mkwrap"))) {
+        wrap = document.createElement("div");
+        wrap.className = "cz-mkwrap" + (card.matches("article.lead") ? " cz-mkwrap-lead"
+          : card.matches(".mcard") ? " cz-mkwrap-card" : "");
+        card.replaceWith(wrap); wrap.appendChild(card);
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "cz-mk";
+        wrap.appendChild(b);
+      }
+      wrap.hidden = !!card.hidden;
+      paintMk($(".cz-mk", wrap), ref, p, hide, card);
+    });
+    $$(".tnode .thead").forEach(head => {
+      const a = $("a.ttitle", head); if (!a) return;
+      const ref = cardStoryRef(a); if (!ref) return;
+      let b = $(".cz-mk", head);
+      if (!b) { b = document.createElement("button"); b.type = "button";
+        b.className = "cz-mk"; head.appendChild(b); }
+      paintMk(b, ref, p, hide, a);
+    });
+  }
+  function paintMk(b, ref, p, hide, card) {
+    if (!b) return;
+    const on = storyIndex(p, ref) >= 0;
+    const named = card.querySelector("b, h2") || card;
+    const name = (named.textContent || "").trim().slice(0, 80) || ref.pid || ref.slug;
+    b.hidden = hide;
+    b.classList.toggle("cz-mk-on", on);
+    b.textContent = on ? "✓ in your paper" : "＋ your paper";
+    b.title = on ? "remove from your paper" : `add this ${ref.story} to your paper`;
+    // the accessible name begins with the visible words (WCAG 2.5.3, label
+    // in name — a voice user says what they see), then says what it does
+    b.setAttribute("aria-label", on ? `in your paper — remove “${name}”`
+                                    : `your paper — add “${name}”`);
+    b.onclick = () => on ? removeStoryRef(ref) : addStoryRef(ref);
+  }
+
   /* which story the open page could contribute — /app/m/<pid> or /app/i/<slug>.
      Pure string work on the path already parsed at the top of the file. */
   function pageStoryRef() {
@@ -791,6 +886,10 @@
     $$(".mcard, .lead").forEach(c => {
       const ok = inScope(c.dataset.town || "", c.dataset.body || "");
       c.hidden = !ok; ok ? shown++ : hidden++;
+      // the make-affordance row a card may sit in (A2) hides with it, or an
+      // orphaned "＋ your paper" would offer a story the scope just hid
+      const w = c.parentElement;
+      if (w && w.classList.contains("cz-mkwrap")) w.hidden = !ok;
     });
     // the rail must say when a scope has emptied it, or an empty column reads
     // as "the record has nothing" instead of "your filter has nothing"
@@ -1985,7 +2084,7 @@
   /* arrange: the panel's ↑ ↓ ✕, one function. Index-addressed against the
      draft as it is NOW — a stale index (another tab just edited) can at worst
      move the wrong neighbour once, and the repaint shows exactly what held. */
-  function movePaperBlock(i, act) {
+  function movePaperBlock(i, act, where) {
     const p = readPaper();
     if (!(i >= 0 && i < p.blocks.length)) return;
     let focus;
@@ -2005,19 +2104,59 @@
       focus = { act, i: j };
     }
     if (!savePaper(p)) toast("this browser blocks storage — the change didn’t hold");
-    refreshPaperSummary(focus); schedulePaperRender();
+    if (where === "page") {
+      // the on-page editor (A3): focus follows the block's own handle (or
+      // the title when the last block left) — never the ✕, the same rule
+      PAGE_FOCUS = focus.act === "title" ? { act: "title" } : { act: "handle", i: focus.i };
+      refreshPaperSummary(); renderPaperNow();
+    } else { refreshPaperSummary(focus); schedulePaperRender(); }
   }
-  /* add the open page as a story. The meta that rides along comes from the
-     page's own plane — already in the fetch cache when the page hydrated — so
-     the panel can label the block without lying; a plane that will not load
-     still adds the bare ref, and the reader's render enriches later. */
-  async function addPageToPaper() {
-    const ref = pageStoryRef();
+  /* move a block from index `from` to LAND before index `to`, counted on
+     the list as it stands before the move — the editor's drop target (a
+     slot between rows). Pure; out of range or a no-op move returns false. */
+  function moveBlock(blocks, from, to) {
+    const n = blocks.length;
+    if (!(from >= 0 && from < n) || !(to >= 0 && to <= n)) return false;
+    const j = to > from ? to - 1 : to;
+    if (j === from) return false;
+    const [b] = blocks.splice(from, 1); blocks.splice(j, 0, b);
+    return true;
+  }
+  function movePaperBlockTo(from, to) {
+    const p = readPaper();
+    if (!moveBlock(p.blocks, from, to)) return;
+    if (!savePaper(p)) toast("this browser blocks storage — the change didn’t hold");
+    PAGE_FOCUS = { act: "handle", i: to > from ? to - 1 : to };
+    refreshPaperSummary(); renderPaperNow();
+  }
+  /* insert a block at an index (the on-page editor's insertion point) or
+     at the end (the panel's adds) — one function, so the block cap and the
+     landing index are decided once. Returns the index it landed at, or -1
+     when the paper is full. */
+  function insertBlock(p, nb, at) {
+    if (p.blocks.length >= PAPER_MAX_BLOCKS) return -1;
+    const i = (at == null || !(at >= 0)) ? p.blocks.length
+      : Math.min(at | 0, p.blocks.length);
+    p.blocks.splice(i, 0, nb);
+    return i;
+  }
+  /* after a block joins: the panel repaints (it is every add's mirror), and
+     the /app/p draft page catches up — on its debounce when the add came
+     from the panel, at once (with focus handed to the new block's handle)
+     when it came from the page itself (A3). */
+  function afterAdd(i, at, focus) {
+    if (at == null) { refreshPaperSummary(focus); schedulePaperRender(); }
+    else { PAGE_FOCUS = focus || { act: "handle", i }; refreshPaperSummary(); renderPaperNow(); }
+  }
+  /* add a story by ref — the open page's (the panel's "＋ this meeting"),
+     a card's (A2), or an add-search hit's (A3). The meta that rides along
+     comes from the story's own plane — already in the fetch cache when the
+     page it was read on hydrated — so the panel can label the block without
+     lying; a plane that will not load still adds the bare ref, and the
+     reader's render enriches later. `at` is the editor's insertion index. */
+  async function addStoryRef(ref, at) {
     if (!ref) { toast("open a meeting or an issue to add it as a story"); return; }
-    const dup = p => ref.story === "meeting"
-      ? p.blocks.some(b => b.kind === "story" && b.story === "meeting" && b.pid === ref.pid)
-      : p.blocks.some(b => b.kind === "story" && b.story === "issue" && b.slug === ref.slug);
-    if (dup(readPaper())) {
+    if (storyIndex(readPaper(), ref) >= 0) {
       toast(`this ${ref.story} is already in your paper`); return; }
     let nb;
     if (ref.story === "meeting") {
@@ -2035,47 +2174,64 @@
     // the fetch awaited — re-read the draft so an edit made meanwhile (this
     // tab or another) isn’t silently reverted by a stale snapshot
     const p = readPaper();
-    if (dup(p)) { toast(`this ${ref.story} is already in your paper`); return; }
-    p.blocks.push(nb);
+    if (storyIndex(p, ref) >= 0) { toast(`this ${ref.story} is already in your paper`); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) {
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
     if (!savePaper(p)) {
       toast("this browser blocks storage — your paper can’t be kept here"); return; }
-    refreshPaperSummary(); schedulePaperRender();
+    afterAdd(i, at);
     toast("added to your paper");
+  }
+  function addPageToPaper() { return addStoryRef(pageStoryRef()); }
+  /* a card's second press (A2): the story leaves. Index-addressed against
+     the draft as it is now, like every arrange. */
+  function removeStoryRef(ref) {
+    const p = readPaper();
+    const i = storyIndex(p, ref);
+    if (i < 0) { toast(`this ${ref.story} isn’t in your paper`); return; }
+    p.blocks.splice(i, 1);
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — the change didn’t hold"); return; }
+    refreshPaperSummary(); schedulePaperRender();
+    toast("removed from your paper");
   }
   /* the reel joins as a snapshot: the block holds these clips as they are
      now, and the tray keeps rolling — tick more moments and add again for a
      second reel. (A live pointer would rewrite a shared paper behind the
      editor's back.) */
-  function addReelToPaper() {
+  function addReelToPaper(at) {
     const clips = readReel(REEL_KEY);
     if (!clips.length) {
       toast("no clips yet — open a meeting and tick its moments"); return; }
     const p = readPaper();
     const nb = normalizeBlock({ kind: "reel", clips: clips.map(c => ({ ...c })) });
     if (!nb) { toast("these clips don’t make a playable reel"); return; }
-    p.blocks.push(nb);
+    const i = insertBlock(p, nb, at);
+    if (i < 0) {
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
     if (!savePaper(p)) {
       toast("this browser blocks storage — your paper can’t be kept here"); return; }
-    refreshPaperSummary(); schedulePaperRender();
+    afterAdd(i, at);
     toast("reel added to your paper — the tray keeps rolling");
   }
   /* a note joins empty and is typed into in the panel — the draft may hold
      the blank; no traveling form does. Focus lands in the fresh textarea. */
-  function addNoteToPaper() {
+  function addNoteToPaper(at) {
     const p = readPaper();
-    if (p.blocks.length >= PAPER_MAX_BLOCKS) {
+    const i = insertBlock(p, { kind: "note", text: "" }, at);
+    if (i < 0) {
       toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
-    p.blocks.push({ kind: "note", text: "" });
     if (!savePaper(p)) {
       toast("this browser blocks storage — your paper can’t be kept here"); return; }
-    refreshPaperSummary({ act: "note", i: p.blocks.length - 1 });
-    schedulePaperRender();
+    // focus lands in the fresh field — the panel's, or the page's own (A3)
+    afterAdd(i, at, { act: "note", i });
   }
   /* a chart joins as an enum + a ref; the label that rides along comes from
      the plane the open page already fetched (or one honest fetch), so the
      panel can name it without lying. The chart itself is computed at render,
      from the record — never stored numbers. */
-  async function addChartToPaper(chart, refv) {
+  async function addChartToPaper(chart, refv, at) {
     if (!PAPER_CHARTS.includes(chart)) return;
     const dup = p => p.blocks.some(b => b.kind === "chart" && b.chart === chart
       && ((b.slug || b.pid || "") === (refv || "")));
@@ -2097,12 +2253,12 @@
     // the fetch awaited — re-read the draft so a meanwhile edit isn't reverted
     const p = readPaper();
     if (dup(p)) { toast("this chart is already in your paper"); return; }
-    if (p.blocks.length >= PAPER_MAX_BLOCKS) {
+    const i = insertBlock(p, nb, at);
+    if (i < 0) {
       toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
-    p.blocks.push(nb);
     if (!savePaper(p)) {
       toast("this browser blocks storage — your paper can’t be kept here"); return; }
-    refreshPaperSummary(); schedulePaperRender();
+    afterAdd(i, at);
     toast("chart added — it draws from the record when your paper renders");
   }
   /* a template (P3): a pre-shaped paper the editor starts from — the same
@@ -2112,8 +2268,13 @@
      storage race) — a template never replaces work without asking. The
      note joins empty on purpose: a template may shape a paper, but the
      editor's words are the editor's to write. */
-  async function applyPaperTemplate(t) {
-    const ref = pageStoryRef();
+  async function applyPaperTemplate(t, ref, where) {
+    // the ref comes from the open page (the panel's offer), the front door's
+    // hash, or the empty editor's starts (A1/A4); `where` = "page" hands the
+    // fresh note to the on-page editor instead of the panel. Returns whether
+    // the draft was written — a caller rendering the page needs to know
+    // whether the old draft still stands.
+    ref = ref || pageStoryRef();
     let title = "", blocks = [];
     if (t === "rolls") {
       title = "the roll calls, watched";
@@ -2136,19 +2297,24 @@
                   town: m.town || "", thumb: m.thumb || "" },
                 { kind: "chart", chart: "framing", pid: ref.pid, title: m.title || "" },
                 { kind: "note", text: "" }];
-    } else return;
-    // the fetch awaited — re-read, and never overwrite silently
+    } else return false;
+    // the fetch awaited — re-read, and never overwrite silently. A draft
+    // that is only a title (named first, shaped second — the on-page
+    // editor's natural order) loses nothing: the name stays, the shape
+    // arrives, no question asked. Blocks are work, and work is asked about.
     const cur = readPaper();
-    if ((cur.title || cur.blocks.length)
+    if (cur.blocks.length
         && !window.confirm("Start from this template? Your current draft "
-                           + "will be replaced.")) return;
+                           + "will be replaced.")) return false;
+    if (!cur.blocks.length && cur.title) title = cur.title;
     const p = normalizePaper({ title, blocks });
     if (!savePaper(p)) {
-      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+      toast("this browser blocks storage — your paper can’t be kept here"); return false; }
     // focus lands in the fresh note: the one block a template cannot write
-    refreshPaperSummary({ act: "note", i: p.blocks.length - 1 });
-    schedulePaperRender();
+    afterAdd(p.blocks.length - 1, where === "page" ? p.blocks.length - 1 : null,
+             { act: "note", i: p.blocks.length - 1 });
     toast("a paper, pre-shaped — the note is yours to write");
+    return true;
   }
   function clearPaper() {
     try { localStorage.removeItem(PAPER_KEY); } catch { /* private mode */ }
@@ -2299,6 +2465,14 @@
     clearTimeout(PAPER_RERENDER);
     PAPER_RERENDER = setTimeout(() => paper(), 350);
   }
+  /* the editor's own edits (A3) repaint at once — the debounce exists for
+     keystrokes in the panel, not for a drop or a ✕ the reader is watching */
+  let PAGE_FOCUS = null;   // where the next /app/p render should land focus
+  function renderPaperNow() {
+    if (!PAPER_DRAFT_PAGE) return;
+    clearTimeout(PAPER_RERENDER);
+    paper();
+  }
   /* fetch a set of planes a few at a time: the 8-worker pool is what protects
      the host from a hostile link's burst; the cap is sized to the document
      model's own envelope, so no sanctioned paper hits it. Returns what was
@@ -2329,6 +2503,11 @@
     const feat = $("#pfeat");
     const showFeat = v => { if (feat) feat.hidden = !v; };
     showFeat(false);
+    // a repaint invalidates any drag in flight (its source row is about to
+    // be detached, and dragend fires on the detached node where no listener
+    // hears it) and every render starts as the reader, not the editor
+    ED_DRAG = -1;
+    el.classList.remove("cz-editing");
     const gen = ++PAPER_GEN;
     const st = decodePaper(location.search);
     if (st.v && !PAPER_VS.includes(st.v))
@@ -2361,13 +2540,75 @@
       // on an empty draft must still repaint as the paper takes shape in the
       // panel beside it (four review lenses caught this one).
       PAPER_DRAFT_PAGE = true;
-      if (!doc.blocks.length && !doc.title) {
+      // the editor's hash (specs/23 A1/A4): #edit opens the studio on this
+      // page — the front door's "Start your paper"; #edit&tpl=…&ref=… writes
+      // a template draft first. Read once per page load, then trimmed back
+      // to #edit so a reload never asks twice. A shared or stored paper
+      // ignores the hash entirely: it is read-only until specs/22's
+      // make-this-yours.
+      // a same-document click on an #edit link (the stub's own "edit your
+      // own", on a page the service worker served at the bare path) only
+      // changes the hash — listen once, and read the door again
+      if (!PAPER_HASH_WIRED) {
+        PAPER_HASH_WIRED = true;
+        window.addEventListener("hashchange", () => {
+          if (!PAPER_DRAFT_PAGE) return;
+          ED_HASH_SEEN = false; renderPaperNow();
+        });
+      }
+      if (!ED_HASH_SEEN) {
+        ED_HASH_SEEN = true;
+        const hp = new URLSearchParams((location.hash || "").replace(/^#/, ""));
+        const tpl = hp.get("tpl") || "";
+        if (hp.has("edit") || tpl) {
+          // the door is a one-time instruction: consumed, then dropped from
+          // the address, so a reload (or back) keeps whatever mode the
+          // reader chose afterwards instead of re-opening the studio
+          try { history.replaceState(null, "", location.pathname + location.search); }
+          catch { /* a sandboxed frame: the hash simply stays */ }
+        }
+        if (hp.has("edit")) {
+          if (shownMode() !== "studio") {
+            // on a phone the studio is an overlay drawer that would cover
+            // the very editor this door promised — open it collapsed to
+            // its rail there; the page shifts by the rail and the editor
+            // is the page. Wide screens get the full sidebar beside it.
+            const narrow = !!(window.matchMedia
+              && window.matchMedia("(max-width: 720px)").matches);
+            writeRail(narrow); setMode("studio");
+            // setMode armed a debounced repaint; THIS render is painting
+            // the studio already, so a second pass would only steal focus
+            clearTimeout(PAPER_RERENDER);
+          }
+          PAGE_FOCUS = PAGE_FOCUS || { act: "title" };
+        }
+        if (tpl) {
+          const tref = (hp.get("ref") || "").trim();
+          const ref = tpl === "meeting" && PAPER_REF.test(tref) ? { story: "meeting", pid: tref }
+            : tpl === "issue" && PAPER_REF.test(tref) ? { story: "issue", slug: tref } : null;
+          // the template writes and renders the page itself; a refused
+          // confirm (or a mangled ref) falls through to the draft as it is
+          if ((tpl === "rolls" || ref) && await applyPaperTemplate(tpl, ref, "page")) return;
+          doc = readPaper();
+        }
+      }
+      const editing = shownMode() === "studio";
+      if (!doc.blocks.length && (editing || !doc.title)) {
         showFeat(true);   // the one state the pressed examples belong to
+        // in the studio the empty draft TEACHES (A4): the title, three big
+        // starts, and the first insertion point
+        if (editing) return paperTeach(el, doc, gen);
+        // the way in is named by what THIS mode paints in the corner: paper
+        // mode holds only the ◐ tab and paints no card affordance at all
         return paperMessage(el, "No paper here yet — this page renders one "
-          + "when a link carries it, or shows your own draft. Enter the "
-          + `studio on any page of <a href="${BASE}/">the record</a>, add `
-          + "the stories and reels that matter to you, and your paper takes "
-          + "shape here.");
+          + "when a link carries it, or shows your own draft. "
+          + (shownMode() === "paper"
+            ? "Press <b>◐ studio</b> in the corner to bring the studio back: "
+              + "this page becomes your editor, and every meeting and issue "
+              + `on <a href="${BASE}/">the record</a> offers “＋ your paper”.`
+            : "Press <b>✎ Your paper — edit</b> in the corner, or open "
+              + `<a href="${BASE}/">the record</a> and press “＋ your paper” on `
+              + "any meeting or issue — your paper takes shape here."));
       }
     }
     PAPER_DRAFT_PAGE = from === "draft";
@@ -2400,10 +2641,36 @@
     if (gen !== PAPER_GEN) return;     // a newer render superseded this one
     const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
     const aux = { votes: votesPlane, analytics };
+    // the on-page editor (specs/23 A3): the DRAFT, in the studio, renders
+    // as itself with the arranging chrome on it — a handle, ↑ ↓, ✕ per
+    // block, the title in place, an insertion point between blocks. A
+    // shared or stored paper never does: it stays exactly the reader.
+    const editing = from === "draft" && shownMode() === "studio";
+    el.classList.toggle("cz-editing", editing);
+    if (editing) {
+      // the draft may have moved under the awaits (a keystroke on this
+      // page's own title or note, another tab): paint what stands NOW. A
+      // changed shape starts over from the fresh draft; a changed title or
+      // note text simply paints fresh — never a stale snapshot over a caret
+      const fresh = readPaper();
+      if (JSON.stringify(fresh.blocks.map(b => b.kind + (b.pid || b.slug || b.chart || "")))
+          !== JSON.stringify(doc.blocks.map(b => b.kind + (b.pid || b.slug || b.chart || "")))) {
+        renderPaperNow(); return; }
+      doc = fresh;
+      const n = doc.blocks.length;
+      const rows = doc.blocks.map((b, i) => edSlot(i)
+        + edRow(renderPaperBlock(b, mby, iby, tried, aux) || paperGone("a block"), b, i, n))
+        .join("") + edSlot(n);
+      const keep = captureEdFocus(el) || captureEdPanel(el);
+      el.innerHTML = edHead(doc) + rows;
+      wireEditor(el);
+      restoreEdFocus(el, PAGE_FOCUS || keep); PAGE_FOCUS = null;
+      return;
+    }
     const head = `<header class="phead">
         <h2 class="ptitle">${esc(doc.title || "Untitled paper")}</h2>
         <p class="pfrom">${from === "draft"
-          ? "your draft — it lives in this browser; share it from the studio as a link or a file"
+          ? "your draft — it lives in this browser. ✎ open the studio to edit it here; share it from the panel as a link or a file"
           : from === "stored"
             ? "served from the share store — content-addressed and read-only; the editor holds the original"
             : "carried whole in the link you followed — no server held it"}</p>
@@ -2787,6 +3054,410 @@
     + `unfetched, not judged gone. The record itself holds it.</p>`;
   function paperMessage(el, html) {
     if (el) el.innerHTML = `<p class="hint">${html}</p>`;
+  }
+
+  /* ---- PART 3: the on-page editor (specs/23 A3) ----------------------------
+     /app/p in the studio is where YOUR DRAFT is arranged on the paper itself,
+     not only in the sidebar. Every block the renderer above paints gets a
+     bar: a drag handle (HTML5 drag-and-drop for the pointer; the same handle
+     takes ↑ ↓ for the keyboard, and the ↑ ↓ ✕ buttons beside it are the
+     panel's own controls, mirrored — so no arrangement is pointer-only), the
+     title is typed in place, a note is typed in place, and an insertion point
+     between any two blocks opens an inline add: a lexical search over the
+     record's own static index (search/meta.json names every meeting,
+     issues/index.json every issue — no API door), plus a note, the reel, and
+     the record-wide charts. Every edit writes the same `cz-paper` draft the
+     panel writes and repaints both surfaces. A shared or stored paper never
+     grows any of this: it is read-only until specs/22's make-this-yours. */
+  let ED_HASH_SEEN = false;   // #edit / #tpl are read once per page load
+  let PAPER_HASH_WIRED = false;
+  const edHead = doc => `<header class="phead cz-edhead">
+      <input class="cz-edtitle" type="text" maxlength="${PAPER_TITLE_MAX}"
+        value="${esc(doc.title)}" placeholder="name your paper"
+        aria-label="your paper’s title">
+      <p class="pfrom">your draft, open for editing — drag a block by its
+        handle or use its ↑ ↓; ✕ removes it; ＋ adds one at that spot. It lives
+        in this browser; share it from the studio panel.</p>
+    </header>`;
+  /* an insertion point: the index a new block would land at */
+  const edSlot = at => `<div class="cz-edslot" data-at="${at}">
+      <button type="button" class="cz-edadd" data-czed="add" data-i="${at}"
+        aria-expanded="false"
+        aria-label="add here${at ? ` — after block ${at}` : " — at the top"}">＋ add here</button>
+    </div>`;
+  const edNote = (b, i) => `<div class="pb-note cz-ednotewrap">
+      <span class="kicker">the editor’s note</span>
+      <textarea class="cz-ednote" data-i="${i}" rows="4" maxlength="${PAPER_NOTE_MAX}"
+        placeholder="your own words — why this matters"
+        aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea></div>`;
+  function edRow(html, b, i, n) {
+    const act = (a, glyph, label, dis) =>
+      `<button type="button" class="cz-edact" data-czed="${a}" data-i="${i}"
+        aria-label="${esc(label)}" title="${esc(label)}"${dis ? " disabled" : ""}>${glyph}</button>`;
+    return `<div class="cz-edrow" data-i="${i}">
+      <div class="cz-edbar">
+        <button type="button" class="cz-edhandle" data-i="${i}"
+          aria-label="block ${i + 1} of ${n} — drag to move, or press ↑ ↓"
+          title="drag to move — or press ↑ ↓">⠿</button>
+        <span class="cz-edkind">${esc(blockLabel(b))}</span>
+        <span class="cz-edacts">${act("up", "↑", `move block ${i + 1} up`, !i)}${act("down", "↓", `move block ${i + 1} down`, i >= n - 1)}${act("del", "✕", `remove block ${i + 1}`)}</span>
+      </div>
+      <div class="cz-edbody">${b.kind === "note" ? edNote(b, i) : html}</div>
+    </div>`;
+  }
+  /* the empty draft, in the studio (A4): a teaching surface — the title,
+     three big starts (the same shapes the featured papers press, offered
+     as DRAFTS; and the record itself, whose cards now carry "＋ your
+     paper"), and the first insertion point. The starts' refs come from
+     stats.json, the front page's own plane. */
+  async function paperTeach(el, doc, gen) {
+    // the stub's "needs JavaScript" hint must not stand while this script
+    // is visibly running — paint the head now, the starts when they arrive
+    const keep = captureEdFocus(el);
+    if (!$(".cz-edteach", el)) {
+      el.classList.add("cz-editing");
+      el.innerHTML = edHead(doc) + `<p class="hint cz-edwait">opening the editor…</p>`;
+      restoreEdFocus(el, keep);
+    }
+    const st = await getJSON(`${BASE}/stats.json`) || {};
+    if (gen !== PAPER_GEN) return;
+    // the reader may have typed a title, or added a block from the panel,
+    // while stats.json travelled — paint the draft as it stands now
+    const fresh = readPaper();
+    if (fresh.blocks.length) { renderPaperNow(); return; }
+    doc = fresh;
+    const keep2 = captureEdFocus(el) || keep;
+    const lead = (st.new || [])[0], loud = (st.loud || [])[0];
+    const start = (t, ref, label, sub) =>
+      `<button type="button" class="cz-edstart" data-czed="tpl" data-tpl="${t}"${ref ? ` data-ref="${esc(ref)}"` : ""}>
+        <b>${esc(label)}</b><span>${esc(sub)}</span></button>`;
+    el.classList.add("cz-editing");
+    el.innerHTML = edHead(doc) + `<section class="cz-edteach">
+        <div class="sectionhead"><span class="kicker">your paper starts empty — three ways in</span></div>
+        <div class="cz-edstarts">
+          ${start("rolls", "", "the roll calls, watched",
+                  "every roll call on the record, dot by dot — and how the talk around them was framed")}
+          ${lead && PAPER_REF.test(lead.pid || "") ? start("meeting", lead.pid, "the latest meeting, covered",
+                  `${lead.title || lead.pid} — as a story, with its framing and what keeps coming back`) : ""}
+          ${loud && PAPER_REF.test(loud.slug || "") ? start("issue", loud.slug, `${cut(loud.name || loud.slug, 60)}, watched`,
+                  `one issue across ${loud.n_meetings || 0} meeting${loud.n_meetings === 1 ? "" : "s"}, and its reach over time`) : ""}
+          <a class="cz-edstart" href="${BASE}/"><b>browse the record →</b>
+            <span>every meeting and issue card carries “＋ your paper” now — read, and press it when a story is yours</span></a>
+        </div>
+        <p class="cz-hint">A shape is a draft, not a decision — every block can be moved or removed, and the note is yours to write. Or add the first block right here:</p>
+        ${edSlot(0)}
+      </section>`;
+    wireEditor(el);
+    // a second pass (the storage event, the panel typing) must put the
+    // caret back where it was — the block path's rule, kept here too
+    restoreEdFocus(el, PAGE_FOCUS || keep2); PAGE_FOCUS = null;
+  }
+  /* focus survives a repaint: what the reader was on, put back after the
+     innerHTML swap — the panel's rule (refreshPaperSummary), on the page */
+  function captureEdFocus(el) {
+    const ae = document.activeElement;
+    if (!ae || !el.contains(ae) || !ae.classList) return null;
+    if (ae.classList.contains("cz-edtitle")) return { act: "title", caret: ae.selectionStart };
+    if (ae.classList.contains("cz-ednote")) return { act: "note", i: +ae.dataset.i, caret: ae.selectionStart };
+    if (ae.classList.contains("cz-edhandle")) return { act: "handle", i: +ae.dataset.i };
+    // an open inline add survives the repaint with its query and its caret:
+    // the field itself, or one of its hit buttons (focus returns to the field)
+    const slot = ae.closest(".cz-edslot");
+    const q = slot && $(".cz-edq", slot);
+    if (q) return { act: "q", at: +slot.dataset.at, v: q.value,
+                    caret: ae === q ? q.selectionStart : null };
+    if (ae.dataset && ae.dataset.czed) return { act: ae.dataset.czed, i: +ae.dataset.i };
+    return null;
+  }
+  /* an open inline add that does NOT hold focus still survives a repaint —
+     as an open panel with its query, focus left where it was */
+  function captureEdPanel(el) {
+    const q = $(".cz-edpanel .cz-edq", el); if (!q) return null;
+    return { act: "qkeep", at: +q.closest(".cz-edslot").dataset.at, v: q.value };
+  }
+  function restoreEdFocus(el, f) {
+    if (!f) return;
+    if (f.act === "q" || f.act === "qkeep") {
+      const slot = $(`.cz-edslot[data-at="${f.at}"]`, el);
+      if (!slot) return;
+      openEdAdd(slot, { value: f.v, focus: f.act === "q", caret: f.caret });
+      return;
+    }
+    let t = f.act === "title" ? $(".cz-edtitle", el)
+      : f.act === "note" ? $(`.cz-ednote[data-i="${f.i}"]`, el)
+      : f.act === "handle" ? $(`.cz-edhandle[data-i="${f.i}"]`, el)
+      : f.act === "add" ? $(`.cz-edadd[data-i="${f.i}"]`, el)
+      : $(`[data-czed="${f.act}"][data-i="${f.i}"]`, el);
+    // NEVER fall to the destructive ✕: a control that vanished or disabled
+    // under the repaint falls to its block's handle, then to the title
+    if (!t || t.disabled || f.act === "del") t = $(`.cz-edhandle[data-i="${f.i}"]`, el);
+    if (!t && f.i != null) { const hs = $$(".cz-edhandle", el); t = hs[Math.min(f.i, hs.length - 1)]; }
+    if (!t) t = $(".cz-edtitle", el);
+    if (!t || typeof t.focus !== "function") return;
+    t.focus();
+    if (typeof f.caret === "number" && t.setSelectionRange)
+      t.setSelectionRange(f.caret, f.caret);
+  }
+  /* the editor's listeners — delegated, installed once per #paperbody, so a
+     repaint never needs rewiring */
+  function wireEditor(el) {
+    if (el._czed) return; el._czed = true;
+    el.addEventListener("click", e => {
+      const b = e.target.closest && e.target.closest("[data-czed]");
+      if (!b || !el.contains(b)) return;
+      const act = b.dataset.czed, i = +b.dataset.i;
+      if (act === "up" || act === "down") movePaperBlock(i, act === "up" ? "pup" : "pdown", "page");
+      else if (act === "del") movePaperBlock(i, "pdel", "page");
+      else if (act === "add") openEdAdd(b.closest(".cz-edslot"));
+      else if (act === "close") closeEdAdd(b.closest(".cz-edslot"));
+      else if (act === "tpl") {
+        const t = b.dataset.tpl, r = b.dataset.ref || "";
+        applyPaperTemplate(t, t === "meeting" ? { story: "meeting", pid: r }
+                            : t === "issue" ? { story: "issue", slug: r } : null, "page");
+      } else if (act === "hit") {
+        const slot = b.closest(".cz-edslot"); if (!slot) return;
+        const at = +slot.dataset.at, kind = b.dataset.kind, ref = b.dataset.ref || "";
+        if (kind === "m") addStoryRef({ story: "meeting", pid: ref }, at);
+        else if (kind === "i") addStoryRef({ story: "issue", slug: ref }, at);
+        else if (kind === "cm") addChartToPaper("framing", ref, at);
+        else if (kind === "ci") addChartToPaper("reach", ref, at);
+        else if (kind === "chart") addChartToPaper(ref, "", at);
+        else if (kind === "note") addNoteToPaper(at);
+        else if (kind === "reel") addReelToPaper(at);
+      }
+    });
+    el.addEventListener("keydown", e => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const h = e.target.closest && e.target.closest(".cz-edhandle");
+      if (h && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault();
+        movePaperBlock(+h.dataset.i, e.key === "ArrowUp" ? "pup" : "pdown", "page");
+      } else if (e.key === "Escape") {
+        const slot = e.target.closest && e.target.closest(".cz-edslot");
+        if (slot && $(".cz-edpanel", slot)) { e.preventDefault(); closeEdAdd(slot); }
+      }
+    });
+    // typing on the page saves on every keystroke and repaints the PANEL
+    // (never this page, whose field holds the caret) — the panel's own rule,
+    // mirrored. The panel's fields are not focused, so its repaint is safe.
+    el.addEventListener("input", e => {
+      const t = e.target; if (!t || !t.classList) return;
+      if (t.classList.contains("cz-edtitle")) {
+        const d = readPaper();
+        d.title = cut(t.value, PAPER_TITLE_MAX);
+        if (!savePaper(d)) return;
+        retireShortOut(); refreshPaperSummary();
+        document.title = `${d.title || "A paper"} — publicrecord.studio`;
+      } else if (t.classList.contains("cz-ednote")) {
+        const d = readPaper(), i = +t.dataset.i;
+        if (!(d.blocks[i] && d.blocks[i].kind === "note")) return;
+        d.blocks[i].text = noteText(t.value);
+        if (!savePaper(d)) return;
+        retireShortOut(); refreshPaperSummary();
+      } else if (t.classList.contains("cz-edq")) {
+        edSearch(t.closest(".cz-edslot"));
+      }
+    });
+    wireEditorDnD(el);
+  }
+  /* drag-and-drop: the handle arms its row (a row is draggable only while
+     its handle is held, so text in a note can still be selected — Firefox
+     cannot select inside a draggable ancestor); a row or a slot is the
+     target; the drop index is the slot's, or the row's upper/lower half. */
+  let ED_DRAG = -1;
+  const edClearDrop = el => $$(".cz-drop-before, .cz-drop-after, .cz-drop-here, .cz-dragging", el)
+    .forEach(x => x.classList.remove("cz-drop-before", "cz-drop-after", "cz-drop-here", "cz-dragging"));
+  function wireEditorDnD(el) {
+    el.addEventListener("pointerdown", e => {
+      const h = e.target.closest && e.target.closest(".cz-edhandle");
+      const row = h && h.closest(".cz-edrow");
+      if (row) row.draggable = true;
+    });
+    el.addEventListener("pointerup", () => $$(".cz-edrow[draggable]", el).forEach(r => r.draggable = false));
+    el.addEventListener("dragstart", e => {
+      const row = e.target.closest && e.target.closest(".cz-edrow");
+      // outside an editor row this is the reader's own drag (a link, a
+      // selection) and none of our business; inside an UNARMED row it is
+      // a link being dragged out of a block, which the handle owns
+      if (!row) return;
+      if (!row.draggable) { e.preventDefault(); return; }
+      ED_DRAG = +row.dataset.i; row.classList.add("cz-dragging");
+      try { e.dataTransfer.setData("text/plain", String(ED_DRAG));
+            e.dataTransfer.effectAllowed = "move"; } catch { /* a browser without dataTransfer */ }
+    });
+    el.addEventListener("dragover", e => {
+      if (ED_DRAG < 0) return;
+      const row = e.target.closest && e.target.closest(".cz-edrow");
+      const slot = e.target.closest && e.target.closest(".cz-edslot");
+      if (!row && !slot) return;
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch { /* ditto */ }
+      $$(".cz-drop-before, .cz-drop-after, .cz-drop-here", el)
+        .forEach(x => x.classList.remove("cz-drop-before", "cz-drop-after", "cz-drop-here"));
+      if (slot) slot.classList.add("cz-drop-here");
+      else { const r = row.getBoundingClientRect();
+        row.classList.add(e.clientY < r.top + r.height / 2 ? "cz-drop-before" : "cz-drop-after"); }
+    });
+    el.addEventListener("drop", e => {
+      if (ED_DRAG < 0) return;
+      const row = e.target.closest && e.target.closest(".cz-edrow");
+      const slot = e.target.closest && e.target.closest(".cz-edslot");
+      // a block dropped anywhere else in the editor (the title field, a
+      // note) is a cancelled move — never a payload typed into a field
+      if (!row && !slot) { e.preventDefault(); ED_DRAG = -1; edClearDrop(el); return; }
+      e.preventDefault();
+      let to;
+      if (slot) to = +slot.dataset.at;
+      else { const r = row.getBoundingClientRect();
+        to = +row.dataset.i + (e.clientY < r.top + r.height / 2 ? 0 : 1); }
+      const from = ED_DRAG; ED_DRAG = -1;
+      edClearDrop(el);
+      movePaperBlockTo(from, to);
+    });
+    el.addEventListener("dragend", () => { ED_DRAG = -1; edClearDrop(el);
+      $$(".cz-edrow[draggable]", el).forEach(r => r.draggable = false); });
+  }
+  /* the inline add (A3): one open at a time; the ＋ it replaces takes focus
+     back on close (Escape, or the close button) */
+  function openEdAdd(slot, opts) {
+    if (!slot) return;
+    opts = opts || {};
+    $$(".cz-edpanel").forEach(x => closeEdAdd(x.closest(".cz-edslot"), true));
+    const btn = $(".cz-edadd", slot); if (!btn) return;
+    btn.setAttribute("aria-expanded", "true"); btn.hidden = true;
+    const clips = readReel(REEL_KEY);
+    const quick = (kind, ref, label) =>
+      `<button type="button" class="btn" data-czed="hit" data-kind="${kind}" data-ref="${esc(ref)}">${esc(label)}</button>`;
+    const panel = document.createElement("div"); panel.className = "cz-edpanel";
+    // the hit list is NOT a live region: ten cards re-announced per
+    // keystroke would drown the field. One short status line speaks the
+    // count instead; the list is there to be walked.
+    panel.innerHTML = `<label class="cz-edqlabel">find a meeting or an issue
+        <input class="cz-edq" type="search" autocomplete="off"
+          placeholder="a body, a month, an issue’s name…"></label>
+      <p class="cz-edcount" role="status"></p>
+      <div class="cz-edhits"></div>
+      <div class="cz-edquick">
+        ${quick("note", "", "＋ a note")}
+        ${clips.length ? quick("reel", "", `＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})`) : ""}
+        ${quick("chart", "votes", "▤ votes over time")}
+        ${quick("chart", "framing", "▤ the record’s framing")}
+        ${quick("chart", "topics", "▤ recurring topics")}
+        <button type="button" class="btn cz-edclose" data-czed="close">close</button>
+      </div>`;
+    slot.appendChild(panel);
+    const q = $(".cz-edq", panel);
+    if (q) {
+      if (typeof opts.value === "string") q.value = opts.value;
+      if (opts.focus !== false) { q.focus();
+        if (typeof opts.caret === "number" && q.setSelectionRange)
+          q.setSelectionRange(opts.caret, opts.caret); }
+    }
+    edSearch(slot);   // the empty query lists a browse start
+  }
+  function closeEdAdd(slot, quiet) {
+    if (!slot) return;
+    const p = $(".cz-edpanel", slot); if (p) p.remove();
+    const btn = $(".cz-edadd", slot);
+    if (btn) { btn.hidden = false; btn.setAttribute("aria-expanded", "false");
+      if (!quiet) btn.focus(); }
+  }
+  /* the add-search's lexical rank — pure, twin-tested: every term must
+     occur in the item's text; a hit at a word start outranks one inside a
+     word; ties fall to the item's own order (newest meeting, widest issue).
+     No terms = everything, in that order (the browse start). */
+  const lexTerms = q => (String(q || "").toLowerCase().match(/[a-z0-9]+/g) || []).slice(0, 8);
+  function lexRank(terms, items) {
+    const scored = [];
+    for (const it of items) {
+      const text = String(it.text || "").toLowerCase();
+      let score = 0, ok = true;
+      for (const t of terms) {
+        const at = text.indexOf(t);
+        if (at < 0) { ok = false; break; }
+        score += (at === 0 || /[^a-z0-9]/.test(text[at - 1])) ? 2 : 1;
+      }
+      if (ok) scored.push([score, it]);
+    }
+    scored.sort((a, b) => b[0] - a[0]
+      || (b[1].sort > a[1].sort ? 1 : b[1].sort < a[1].sort ? -1 : 0));
+    return scored.map(x => x[1]);
+  }
+  let ED_INDEX = null;   // the static index, read once per page
+  /* total over whatever arrives (decodeReel's law): a plane that did not
+     load is remembered as DARK — "the index didn't load" is a different
+     fact from "the record holds nothing", and the reader is owed the true
+     one; a plane that loaded is re-asked for never, a dark one is retried
+     on the next open. A malformed element is simply not an entry. */
+  const edEntry = x => x && typeof x === "object";
+  function edIndex() {
+    return ED_INDEX ||= Promise.all([
+      getJSON(`${BASE}/search/meta.json`), getJSON(`${BASE}/issues/index.json`),
+    ]).then(([meta, issues]) => ({
+      dark: { m: !Array.isArray(meta), i: !Array.isArray(issues) },
+      meetings: (Array.isArray(meta) ? meta : []).filter(m => edEntry(m) && PAPER_REF.test(m.pid || "")).map(m => ({
+        kind: "m", ref: m.pid, title: m.title || m.pid,
+        meta: [m.body, m.town, m.date].filter(Boolean).join(" · "),
+        text: [m.title, m.body, m.town, m.date].filter(Boolean).join(" "),
+        sort: m.date || "" })),
+      issues: (Array.isArray(issues) ? issues : []).filter(i => edEntry(i) && PAPER_REF.test(i.slug || "")).map(i => ({
+        kind: "i", ref: i.slug, title: i.name || i.slug,
+        meta: `issue · ${i.n_meetings || 0} meeting${i.n_meetings === 1 ? "" : "s"}`
+          + (i.first_seen ? ` · ${String(i.first_seen).slice(0, 4)}–${String(i.last_seen || "").slice(0, 4)}` : ""),
+        text: [i.name, ...(Array.isArray(i.aliases) ? i.aliases : [])].filter(Boolean).join(" "),
+        sort: +i.n_meetings || 0 })),
+    })).then(idx => { if (idx.dark.m || idx.dark.i) edForget(idx.dark); return idx; },
+             () => { edForget({ m: true, i: true });
+                     return { dark: { m: true, i: true }, meetings: [], issues: [] }; });
+  }
+  /* a dark plane is retried on the next open — which means forgetting it
+     in getJSON's own cache as well (that cache keeps a failed fetch's null
+     for the page's life), not only here */
+  function edForget(dark) {
+    ED_INDEX = null;
+    if (dark.m) delete _cache[`${BASE}/search/meta.json`];
+    if (dark.i) delete _cache[`${BASE}/issues/index.json`];
+  }
+  async function edSearch(slot) {
+    if (!slot) return;
+    const idx = await edIndex();
+    const box = $(".cz-edhits", slot), q = $(".cz-edq", slot);
+    const count = $(".cz-edcount", slot);
+    if (!box || !q) return;   // closed while the index loaded
+    const terms = lexTerms(q.value);
+    const is = lexRank(terms, idx.issues).slice(0, 5);
+    const ms = lexRank(terms, idx.meetings).slice(0, 5);
+    const p = readPaper();
+    const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+    if (idx.dark.m && idx.dark.i) {
+      if (count) count.textContent = "";
+      box.innerHTML = `<p class="cz-hint">the record’s index didn’t load here —
+        try again in a moment, or add a story from its own meeting or issue
+        page (“＋ your paper”).</p>`;
+      return;
+    }
+    const dark = idx.dark.m ? " · the meetings index didn’t load"
+               : idx.dark.i ? " · the issues index didn’t load" : "";
+    if (count) count.textContent = (is.length || ms.length)
+      ? `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}${terms.length ? " match" : ""}${dark}`
+      : `no match${dark}`;
+    const hit = h => {
+      const ref = h.kind === "m" ? { story: "meeting", pid: h.ref } : { story: "issue", slug: h.ref };
+      const on = storyIndex(p, ref) >= 0;
+      return `<div class="cz-edhit">
+        <span class="cz-edhit-t"><b>${esc(h.title)}</b><span class="cz-edhit-m">${esc(h.meta)}</span></span>
+        <span class="cz-edhit-a">${on
+          ? `<span class="cz-edhit-in">✓ in your paper</span>`
+          : `<button type="button" class="btn" data-czed="hit" data-kind="${h.kind}" data-ref="${esc(h.ref)}"
+               aria-label="add “${esc(h.title)}” as a story">＋ story</button>`}
+          <button type="button" class="btn" data-czed="hit" data-kind="${h.kind === "m" ? "cm" : "ci"}" data-ref="${esc(h.ref)}"
+            aria-label="add a ${h.kind === "m" ? "framing" : "reach"} chart for “${esc(h.title)}”">▤ ${h.kind === "m" ? "framing" : "reach"}</button>
+        </span></div>`; };
+    box.innerHTML = (!ms.length && !is.length)
+      ? `<p class="cz-hint">nothing among the record’s ${n(idx.meetings.length, "meeting", "meetings")}
+           and ${n(idx.issues.length, "issue", "issues")} matches “${esc(q.value.trim())}”${esc(dark)}</p>`
+      : (is.length ? `<span class="cz-edgroup">issues</span>${is.map(hit).join("")}` : "")
+        + (ms.length ? `<span class="cz-edgroup">meetings</span>${ms.map(hit).join("")}` : "");
   }
 
   /* ================= SEARCH ================= */

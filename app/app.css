@@ -268,17 +268,30 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm);
   border-left:var(--border-w-strong) solid var(--accent)}
 .vteaser:hover{background:var(--tint-1)}
-/* one quiet line, after everything the record itself has to say: the papers
-   the press built (specs/21 P3) — the folio's register, no card, no color */
-.featline{font-family:var(--font-mono);font-size:var(--text-xs);
-  color:var(--text-secondary);margin:var(--space-6) 0 0;
-  border-top:var(--border-w) solid var(--border-hairline);
-  padding-top:var(--space-3);line-height:var(--leading-body)}
-/* links in prose distinguish themselves by more than color (G183: ink vs
-   slate is 2.36:1) — the underline is the affordance */
-.featline a{color:var(--text-primary);text-decoration:underline;
-  text-underline-offset:2px}
-.featline a:hover{color:var(--accent)}
+/* ============================ your paper — the front door (specs/23 A1) ====
+   The record's own invitation to its making half: baked prose in the paper
+   palette (deep green is the one accent; no studio hue, no studio class —
+   the byte-clean guard sweeps every stub). Real links throughout, so a
+   reader with JavaScript off follows them and the editor they land on says
+   honestly what it needs. The featured papers (pf-) ride along as cards. */
+.yp-door{margin-top:var(--space-7);padding:var(--space-5);
+  border-top:3px solid var(--accent);
+  border-bottom:var(--border-w) solid var(--border-hairline);
+  background:var(--tint-1)}
+.yp-kick{display:block;margin-bottom:var(--space-2)}
+.yp-hl{font-family:var(--font-mono);font-weight:var(--weight-black);font-size:26px;
+  line-height:1.15;letter-spacing:-.015em;max-width:26ch;margin:0 0 var(--space-3);
+  color:var(--text-primary)}
+.yp-copy{max-width:64ch;font-size:var(--text-md);line-height:var(--leading-body);
+  margin:0 0 var(--space-2);color:var(--text-primary)}
+.yp-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);
+  margin-top:var(--space-4)}
+.yp-start{font-size:var(--text-base);padding:11px 16px}
+.yp-or{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);
+  text-transform:uppercase;letter-spacing:var(--tracking-label);margin-left:var(--space-2)}
+.yp-tpl{font-size:var(--text-xs)}
+.yp-pressed{margin-top:var(--space-5)}
+.yp-pressed .kicker{display:block;margin-bottom:var(--space-3)}
 .vt-motion{display:block;font-size:var(--text-sm);color:var(--text-primary)}
 .vt-meta{display:block;font-family:var(--font-mono);font-size:var(--text-xs);
   color:var(--text-secondary);margin-top:3px}
@@ -513,6 +526,10 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
    by the renderer the moment a real paper stands. The paper palette only —
    mcard's register, and not one studio hue (§6.1). */
 .pfeat{margin:var(--space-6) 0 0}
+/* a link in the lede's prose distinguishes itself by more than color
+   (G183: ink vs slate is 2.36:1) — the underline is the affordance */
+.pf-lede a{color:var(--text-primary);text-decoration:underline;text-underline-offset:2px}
+.pf-lede a:hover{color:var(--accent)}
 .pf-lede{font-size:var(--text-sm);color:var(--text-secondary);max-width:60ch;
   margin:var(--space-2) 0 var(--space-3)}
 .pf-cards{display:grid;gap:var(--space-3);
@@ -848,6 +865,10 @@ table.twin a{color:var(--accent)}
 /* ============================ responsive ============================ */
 @media (max-width:720px){
   .main{padding:var(--space-4) var(--space-4) var(--space-7)}
+  .yp-door{padding:var(--space-4)}
+  .yp-hl{font-size:22px}
+  .yp-start{width:100%;text-align:center}
+  .yp-or{margin-left:0;flex:0 0 100%}
   .masthead{padding:var(--space-3) var(--space-4) 0}
   .brand{gap:var(--space-2)}
   .brand .brandmark svg{width:26px;height:26px}
@@ -1098,6 +1119,152 @@ html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
 html.cz-m-studio .cz-studio .btn.primary{background:var(--studio-accent-text);
   border-color:var(--studio-accent-text)}
 
+/* --- "＋ your paper" on the record's cards (specs/23 A2): script-added in
+   preview and studio, never baked, never in paper mode. The row wraps the
+   card untouched and the button sits beside it in the PAPER palette — the
+   invitation may be visible, but preview is the quiet default, so it wears
+   the record's deep green, never the studio's purple. --- */
+.cz-mkwrap{display:flex;align-items:stretch;gap:6px;min-width:0}
+.cz-mkwrap>.lrow,.cz-mkwrap>.rsrow{flex:1;min-width:0}
+.cz-mkwrap[hidden]{display:none}
+/* a brief card is narrow (a 1fr column beside the lead): the button sits
+   UNDER it as a caption, right-aligned, so the title keeps its width */
+.cz-mkwrap-card{flex-direction:column;align-items:flex-end;gap:2px}
+.cz-mkwrap-card>.mcard{width:100%}
+.cz-mkwrap-card>.cz-mk{border-color:transparent;padding:5px 6px;align-self:flex-end}
+.cz-mkwrap-card>.cz-mk:hover{border-color:var(--accent)}
+.cz-mkwrap-lead{display:block;position:relative}
+.cz-mkwrap-lead>.cz-mk{position:absolute;top:0;right:0}
+/* the lead's kicker keeps the button's width clear, so a 320px phone never
+   paints the two over each other — only while the button is painted: paper
+   mode gets the kicker exactly as pressed */
+html:not(.cz-m-paper) .cz-mkwrap-lead>.lead>.kicker{padding-right:112px}
+.cz-mk{flex:0 0 auto;align-self:center;font:var(--weight-bold) 11px/1.2 var(--font-mono);
+  letter-spacing:.02em;cursor:pointer;background:var(--surface-card);color:var(--accent);
+  border:var(--border-w) solid var(--accent);border-radius:var(--radius-sm);
+  padding:7px 8px;min-height:24px;white-space:nowrap}
+.cz-mk:hover{background:var(--accent);color:var(--text-inverse)}
+.cz-mk-on{background:var(--accent);color:var(--text-inverse)}
+.cz-mk-on:hover{background:#031d0e}
+.cz-mk[hidden]{display:none}
+html.cz-m-paper .cz-mk{display:none}   /* belt to the JS's brace: never in paper */
+.cz-mk:focus-visible{outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
+/* the issue timeline's head is a centred stack, not a flex row — the
+   button is one more centred line under it */
+.tnode .thead .cz-mk{display:inline-block;margin-top:4px}
+
+/* --- the on-page editor (specs/23 A3): /app/p, studio mode, the DRAFT.
+   Studio chrome laid over the record's own paper: the bars, slots and the
+   inline add wear the studio accent (they exist only under html.cz-m-studio,
+   so the tokens are in scope and the bound holds by construction); the
+   blocks inside them are the paper's own classes, untouched. --- */
+html.cz-m-studio .cz-edhead{border-bottom-color:var(--studio-accent)}
+html.cz-m-studio .cz-edtitle{width:100%;box-sizing:border-box;
+  font:var(--weight-bold) 30px/var(--leading-tight) var(--font-mono);
+  letter-spacing:-.01em;color:var(--text-primary);background:var(--surface-card);
+  border:var(--border-w) dashed var(--border-strong);border-radius:var(--radius-sm);
+  padding:6px 10px;margin:0 0 var(--space-2)}
+html.cz-m-studio .cz-edtitle::placeholder{color:var(--text-secondary);font-weight:var(--weight-regular)}
+html.cz-m-studio .cz-edrow{border:var(--border-w) dashed var(--border-hairline);
+  border-radius:var(--radius-sm);padding:0 var(--space-3) var(--space-3)}
+html.cz-m-studio .cz-edrow:hover,html.cz-m-studio .cz-edrow:focus-within{border-color:var(--studio-accent)}
+html.cz-m-studio .cz-edrow.cz-dragging{opacity:.5}
+html.cz-m-studio .cz-edrow.cz-drop-before{border-top:3px solid var(--studio-accent)}
+html.cz-m-studio .cz-edrow.cz-drop-after{border-bottom:3px solid var(--studio-accent)}
+html.cz-m-studio .cz-edbar{display:flex;align-items:center;gap:var(--space-2);
+  padding:6px 0;margin-bottom:var(--space-2);
+  border-bottom:var(--border-w) solid var(--border-hairline)}
+html.cz-m-studio .cz-edhandle{font:var(--weight-bold) var(--text-md)/1 var(--font-mono);
+  background:none;border:0;color:var(--text-secondary);cursor:grab;padding:6px 8px;
+  min-width:24px;min-height:24px;touch-action:none}
+html.cz-m-studio .cz-edhandle:hover{color:var(--studio-accent-text)}
+html.cz-m-studio .cz-edkind{flex:1;min-width:0;
+  font:var(--weight-bold) var(--text-xs)/1.2 var(--font-mono);
+  letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--text-secondary);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+html.cz-m-studio .cz-edacts{display:inline-flex;gap:2px}
+html.cz-m-studio .cz-edact{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  background:none;border:0;color:var(--text-secondary);cursor:pointer;padding:7px;
+  min-width:24px;min-height:24px}
+html.cz-m-studio .cz-edact:hover{color:var(--studio-accent-text)}
+html.cz-m-studio .cz-edact[disabled]{opacity:.35;cursor:default}
+html.cz-m-studio .cz-edbody>.mcard,html.cz-m-studio .cz-edbody>.pb-reel,
+html.cz-m-studio .cz-edbody>.pb-chart,html.cz-m-studio .cz-edbody>.pb-note{margin:0}
+html.cz-m-studio .cz-ednote{width:100%;box-sizing:border-box;resize:vertical;min-height:72px;
+  font:var(--weight-regular) 16px/1.45 var(--font-sans);color:var(--text-primary);
+  background:var(--surface-card);border:var(--border-w) dashed var(--border-strong);
+  border-radius:var(--radius-sm);padding:7px 9px}
+html.cz-m-studio .cz-ednote::placeholder{color:var(--text-secondary)}
+/* the insertion point: a dashed rule with a ＋ in it; a drop thickens it */
+html.cz-m-studio .cz-edslot{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);
+  margin:var(--space-2) 0;min-height:24px}
+html.cz-m-studio .cz-edslot::before,html.cz-m-studio .cz-edslot::after{content:"";flex:1;
+  border-top:var(--border-w) dashed var(--border-hairline)}
+html.cz-m-studio .cz-edslot.cz-drop-here::before,
+html.cz-m-studio .cz-edslot.cz-drop-here::after{border-top:3px solid var(--studio-accent)}
+html.cz-m-studio .cz-edadd{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  background:var(--surface-card);color:var(--text-secondary);cursor:pointer;
+  border:var(--border-w) solid var(--border-hairline);border-radius:999px;
+  padding:6px 10px;min-height:24px}
+html.cz-m-studio .cz-edadd:hover{color:var(--studio-accent-text);border-color:var(--studio-accent)}
+html.cz-m-studio .cz-edadd[hidden]{display:none}
+html.cz-m-studio .cz-edpanel{flex:0 0 100%;background:var(--studio-surface);
+  border:var(--border-w) solid var(--studio-accent);border-radius:var(--radius-sm);
+  padding:var(--space-3);margin-top:var(--space-2)}
+html.cz-m-studio .cz-edqlabel{display:block;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--text-secondary)}
+html.cz-m-studio .cz-edq{display:block;width:100%;box-sizing:border-box;margin-top:6px;
+  font:var(--weight-regular) 16px/1.3 var(--font-sans);color:var(--text-primary);
+  background:var(--surface-card);border:var(--border-w) solid var(--border-strong);
+  border-radius:var(--radius-sm);padding:8px 10px}
+/* the field's hint is still text — slate clears AA where the UA default
+   (#a9a9a9, 2.35:1) would not */
+html.cz-m-studio .cz-edq::placeholder{color:var(--text-secondary)}
+html.cz-m-studio .cz-edcount{font:var(--weight-medium) var(--text-xs)/1.4 var(--font-mono);
+  color:var(--text-secondary);margin:var(--space-2) 0 0;min-height:1.4em}
+html.cz-m-studio .cz-edwait{margin-top:var(--space-4)}
+html.cz-m-studio .cz-edhits{margin:var(--space-3) 0;display:grid;gap:6px;
+  grid-template-columns:minmax(0,1fr)}   /* never wider than the panel, whatever a hit's min-content */
+html.cz-m-studio .cz-edgroup{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--text-secondary);
+  margin-top:4px}
+html.cz-m-studio .cz-edhit{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;
+  background:var(--surface-card);border:var(--border-w) solid var(--border-hairline);
+  border-radius:var(--radius-sm);padding:6px 8px}
+html.cz-m-studio .cz-edhit-t{flex:1 1 160px;min-width:0;display:flex;flex-direction:column;gap:2px}
+/* the title WRAPS (a nowrap title's min-content would push the whole panel
+   past a phone's edge) */
+html.cz-m-studio .cz-edhit-t b{font-family:var(--font-mono);font-size:var(--text-sm);
+  overflow-wrap:anywhere}
+html.cz-m-studio .cz-edhit-m{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary)}
+html.cz-m-studio .cz-edhit-a{display:inline-flex;gap:4px;align-items:center}
+html.cz-m-studio .cz-edhit-a .btn,html.cz-m-studio .cz-edquick .btn{font-size:var(--text-xs);padding:6px 9px}
+html.cz-m-studio .cz-edhit-in{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);color:var(--accent)}
+html.cz-m-studio .cz-edquick{display:flex;flex-wrap:wrap;gap:var(--space-2);
+  border-top:var(--border-w) solid var(--border-hairline);padding-top:var(--space-3)}
+/* the empty draft's starts (A4) */
+html.cz-m-studio .cz-edteach{margin-top:var(--space-4)}
+html.cz-m-studio .cz-edstarts{display:grid;gap:var(--space-3);
+  grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:var(--space-3) 0}
+html.cz-m-studio .cz-edstart{display:flex;flex-direction:column;gap:4px;text-align:left;
+  cursor:pointer;background:var(--surface-card);color:var(--text-primary);
+  border:var(--border-w) solid var(--border-hairline);
+  border-left:var(--border-w-strong) solid var(--studio-accent);
+  border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);
+  font:var(--weight-regular) var(--text-xs)/var(--leading-body) var(--font-sans);
+  text-decoration:none}
+html.cz-m-studio .cz-edstart b{font-family:var(--font-mono);font-size:var(--text-base)}
+html.cz-m-studio .cz-edstart span{color:var(--text-secondary)}
+html.cz-m-studio .cz-edstart:hover b{color:var(--studio-accent-text);text-decoration:underline}
+html.cz-m-studio .cz-edteach .cz-hint{margin:var(--space-2) 0}
+/* keyboard-visible focus for every editor control — with the fallback, or
+   the bare token resolves to outline:none (the block's documented trap) */
+html.cz-m-studio .cz-edtitle:focus-visible,html.cz-m-studio .cz-edhandle:focus-visible,
+html.cz-m-studio .cz-edact:focus-visible,html.cz-m-studio .cz-edadd:focus-visible,
+html.cz-m-studio .cz-edstart:focus-visible,html.cz-m-studio .cz-edq:focus-visible,
+html.cz-m-studio .cz-ednote:focus-visible,html.cz-m-studio .cz-edpanel .btn:focus-visible{
+  outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
+
 /* --- the paper-mode tab (flat: the ink surface is its own separation) --- */
 .cz-tab{align-items:center;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
   letter-spacing:var(--tracking-label);background:var(--surface-inverse);
@@ -1125,4 +1292,10 @@ html.cz-m-studio .cz-toast{left:calc(50% + var(--sw) / 2)}
   html.cz-m-studio .cz-toast{left:50%}
   html.cz-m-studio .cz-studio{width:min(320px, 86vw)}
   html.cz-m-studio.cz-rail .cz-studio{width:44px}
+  /* the collapsed rail is a fixed 44px strip: shift the page by exactly
+     that, or it covers the left edge of every line — and, in the editor,
+     every block's handle (specs/23 A3). The open drawer stays an overlay;
+     a 320px drawer cannot shift a 375px page. */
+  html.cz-m-studio.cz-rail body{padding-left:44px}
+  html.cz-m-studio.cz-rail .mini-header{left:44px}
 }
