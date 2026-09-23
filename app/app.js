@@ -249,7 +249,7 @@
         refreshReelSummary();
         refreshPaperSummary();   // the reel add-button's count rides the tray
       }
-      if (k === PAPER_KEY || k === null) {
+      if (k === PAPERS_KEY || k === PAPER_KEY || k === null) {
         retireShortOut();        // another tab changed the paper — the minted
                                  // link names the old one and must not repaint
         refreshPaperSummary();
@@ -298,6 +298,8 @@
       // stands: the cite sheet, and reel.json for a single-meeting reel.
       else if (act === "rtact") trayAct(+b.dataset.i, b.dataset.act);
       else if (act === "pvplay") pvPlay(readReel(REEL_KEY)[+b.dataset.i]);
+      else if (act === "pquote") { const c = readReel(REEL_KEY)[+b.dataset.i];
+        if (c) addQuoteRef(c.pid, c.t != null ? c.t : c.start, null, c.quote || ""); }
       else if (act === "pvstop") pvPause();
       else if (act === "reelcite") { const c = readReel(REEL_KEY);
         if (c.length) copyText(citeSheet(trayMeta(c), c), "cite sheet copied — receipts for every clip"); }
@@ -319,6 +321,8 @@
       else if (act === "pjson") downloadPaper(readPaper());
       else if (act === "pshort") paperShortLink();
       else if (act === "pclear") clearPaper();
+      else if (act === "pnew") newPaper();
+      else if (act === "pdelete") deletePaper();
     });
   }
 
@@ -429,7 +433,9 @@
         <span class="cz-rord">${i + 1}</span>
         <span class="cz-rmain">
           <span class="cz-rquote" tabindex="-1" title="${esc(label)}">${esc(label)}</span>
-          <span class="cz-rmeta">${esc(c.kind || "moment")}${meets > 1 && from ? ` · ${esc(from)}` : ""}
+          <span class="cz-rmeta"><button type="button" class="cz-rquotebtn" data-cz="pquote" data-i="${i}"
+              title="quote this clip’s line in your paper" aria-label="quote clip ${i + 1}’s line in your paper">❝ quote</button>
+            ${esc(c.kind || "moment")}${meets > 1 && from ? ` · ${esc(from)}` : ""}
             · <span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span> · ${hms(clipLen(c))}</span>
           <span class="cz-rtrim" role="group" aria-label="trim clip ${i + 1} — the edges snap to the record’s own lines">
             <span class="cz-rtl">in</span>${act("s-", i, `clip ${i + 1}: start earlier`, "◀")}${act("s+", i, `clip ${i + 1}: start later`, "▶")}
@@ -476,10 +482,13 @@
       // disabled — hand focus to the opposite arrow, NEVER the ✕ (the
       // paper panel's rule: a held key must not find delete armed)
       if (t && t.disabled) {
-        const other = focus.act === "up" ? "down" : "up";
-        t = $(`[data-cz="rtact"][data-act="${other}"][data-i="${focus.i}"]`, body);
+        // a ▶ gone disabled (its clip's meeting has no tape) hands focus to
+        // its row's ↗ — never an arrow; an arrow at a pole, to the other
+        t = focus.act === "pvplay"
+          ? $(`.cz-rclip[data-i="${focus.i}"] .cz-rprev`, body)
+          : $(`[data-cz="rtact"][data-act="${focus.act === "up" ? "down" : "up"}"][data-i="${focus.i}"]`, body);
       }
-      if (!t) t = $(".cz-reelacts .btn", body);
+      if (!t || t.disabled) t = $(".cz-reelacts .btn", body);
       if (t) t.focus();
     }
   }
@@ -502,13 +511,18 @@
     : "▤ framing — the whole record";
   /* one name per block, shared by the panel's rows and the page editor's
      bars (A3) so the two surfaces never call a block two things */
+  const n_blocks = n => `${n} block${n === 1 ? "" : "s"}`;
   const blockLabel = b => b.kind === "reel"
       ? `▶ a reel — ${b.clips.length} clip${b.clips.length > 1 ? "s" : ""} · ${hms(reelRuntime(b.clips))}`
     : b.kind === "note"
       ? `✎ a note${b.text.trim() ? " — " + b.text.trim().slice(0, 40) : ""}`
     : b.kind === "chart" ? chartRowLabel(b)
+    : b.kind === "quote" ? `❝ ${(b.text || "").trim().slice(0, 40) || `a line at ${hms(b.t)}`}`
+    : b.kind === "doc" ? `📄 ${b.dkind ? b.dkind + " — " : ""}${b.title || b.doc}`
+    : b.kind === "digest" ? `⟳ what changed — ${b.name || b.slug} (${b.n})`
     : b.story === "issue" ? `◈ ${b.name || b.slug}`
     : `§ ${b.title || b.pid}`;
+  const blockLabelL = b => blockLabel(b) + (b.layout ? ` · ${LAYOUT_LABEL[b.layout]}` : "");
   function refreshPaperSummary(focus) {
     if (!STUDIO) return;
     // every paper change repaints the ✓ on the record's cards (A2) — the
@@ -530,7 +544,7 @@
         focus = { act: "note", i: +ae.dataset.i, caret: ae.selectionStart };
     }
     const rows = p.blocks.map((b, i) => {
-      const label = blockLabel(b);
+      const label = blockLabelL(b);
       return `<div class="cz-prow" data-i="${i}">
         <span class="cz-plabel" tabindex="-1" title="${esc(label)}">${esc(label)}</span>
         <span class="cz-pacts">
@@ -601,8 +615,21 @@
       + (ref && ref.story === "issue" ? tplBtn("issue", "this issue, watched") : "")
       + (ref && ref.story === "meeting" ? tplBtn("meeting", "this meeting, covered") : "")
       + `</div>`;
-    el.innerHTML =
-        `<input class="cz-ptitle" type="text" maxlength="200"
+    /* the shelf (C1): which paper is open, a new one, and delete — the
+       select appears once there is a choice; "＋ new" always */
+    const sh = readPapers();
+    const shelf = `<div class="cz-shelf">`
+      + (sh.papers.length > 1
+        ? `<label class="cz-shelflabel">open
+             <select class="cz-shelfsel" data-cz="pshelf" aria-label="which of your papers is open">
+             ${sh.papers.map(x => `<option value="${esc(x.id)}"${x.id === sh.active ? " selected" : ""}>${esc(x.title || "untitled")} · ${n_blocks(x.blocks.length)}</option>`).join("")}
+             </select></label>`
+        : `<span class="cz-shelflabel">one paper on your shelf</span>`)
+      + `<button type="button" class="btn" data-cz="pnew" title="start another paper">＋ new</button>`
+      + (sh.papers.length > 1 ? `<button type="button" class="btn" data-cz="pdelete" title="delete the open paper">delete</button>` : "")
+      + `</div>`;
+    el.innerHTML = shelf
+      + `<input class="cz-ptitle" type="text" maxlength="200"
            placeholder="name your paper" aria-label="your paper’s title"
            value="${esc(p.title)}">`
       + rows
@@ -648,8 +675,11 @@
       if (had !== has)
         refreshPaperSummary({ act: "note", i, caret: ta.selectionStart });
     });
+    const shsel = $(".cz-shelfsel", el);
+    if (shsel) shsel.onchange = () => switchPaper(shsel.value);
     if (focus) {
       let t = focus.act === "title" ? ti
+        : focus.act === "pshelf" ? (shsel || ti)
         : focus.act === "note"
           ? $(`.cz-pnote[data-i="${focus.i}"]`, el)
         : focus.act === "row"
@@ -772,9 +802,19 @@
          Playing a sequence is /app/r's job and stays there.
        · HIDDEN IS SILENT: leaving the studio or collapsing the rail pauses
          the stage; a frame nobody can see must not keep talking. */
-  const PV = { win: null, ready: false, clip: null, armed: false, settling: false,
+  /* the reader's hand is in a frame when the frame holds the focus — a
+     press inside a cross-origin player moves focus to its <iframe> */
+  const inFrame = el => !!el && document.activeElement === el;
+  /* the stage. `hold`: told to be silent and not yet SEEN silent (a paused
+     or cued report) — a play the frame reports meanwhile with no reader's
+     hand in it is its own autoplay landing late, and is silenced again (a
+     pause sent before playback has begun is a no-op to the player).
+     `state`: the frame's last reported playerState; `free`: the reader's
+     own ▶ on the frame, playing the tape outside any clip */
+  const PV = { win: null, el: null, ready: false, clip: null, armed: false, settling: false,
                ended: false, vid: "", pending: null, wired: false,
-               playing: false, stopped: false, watch: 0 };
+               playing: false, paused: false, free: false, stopped: false, blocked: false,
+               hold: false, watch: 0, state: -2, t: 0, last: null };
   const PV_ORIGIN = "https://www.youtube-nocookie.com";
   function pvSend(func, args) {
     if (!PV.win) return;
@@ -786,26 +826,28 @@
   /* the one-engine rule, the page's half: whatever the page player was
      doing stops when the stage speaks */
   function pagePause() {
-    if (typeof YT !== "undefined") {
+    if (typeof YT !== "undefined" && YT.loaded) {
+      // the page is held silent until it is SEEN silent; a player still in
+      // its load gap keeps the place it was asked for (onReady CUES it
+      // there — a seek would play) and so does a stashed cross-meeting cite
+      if (!YT.ready || ![0, 2, 5].includes(YT.state)) YT.hold = true;
       if (YT.win && YT.ready) ytSend("cmd", "pauseVideo", []);
-      // a page player still in its load gap would seek and play on ready —
-      // drop the stashed seek and ask onReady to hush it instead
-      if (YT.loaded && !YT.ready) { YT.pending = null; YT.hush = true; }
     }
-    if (typeof REELPLAY !== "undefined" && REELPLAY && (REELPLAY.active || REELPLAY.pending)) {
-      REELPLAY.pending = null;
-      if (REELPLAY.active) { REELPLAY.active = false; REELPLAY.armed = false;
-        REELPLAY.paused = true; reelShow(); }
+    if (typeof REELPLAY !== "undefined" && REELPLAY && REELPLAY.active) {
+      REELPLAY.active = false; REELPLAY.armed = false;
+      REELPLAY.paused = true; reelShow();
     }
   }
   /* …and the stage's half: idempotent, safe before the stage exists */
   function pvPause() {
-    clearTimeout(PV.watch);
+    clearTimeout(PV.watch); PV.blocked = false;
     // a stop before the frame is ready cannot reach it yet — remember it,
-    // and onReady silences the autoplay the frame was built with
+    // and onReady cues the tape instead of letting it autoplay
     if (!PV.ready && (PV.win || PV.pending || PV.vid)) PV.stopped = true;
+    if ((PV.win || PV.pending) && (!PV.ready || ![0, 2, 5].includes(PV.state))) PV.hold = true;
     if (PV.ready) pvSend("pauseVideo");
-    if (!PV.clip && !PV.pending) { PV.playing = false; return; }
+    const was = PV.free || PV.paused; PV.free = false; PV.paused = false;
+    if (!PV.clip && !PV.pending) { PV.playing = false; if (was) pvShow(); return; }
     PV.last = PV.clip || PV.pending || PV.last;   // the tape the frame still shows
     PV.clip = null; PV.armed = false; PV.ended = false; PV.pending = null; PV.playing = false;
     pvShow();
@@ -817,7 +859,13 @@
     const key = clipKey(PV.clip);
     const c = clips.find(x => clipKey(x) === key);
     if (c && (c.start !== PV.clip.start || c.end !== PV.clip.end)) {
-      PV.clip = { ...PV.clip, start: c.start, end: c.end }; PV.ended = false; pvShow();
+      // the gate follows the new edges. A clip that has PLAYED stays played
+      // (its frame rests paused at the old end — ▶ hears the new cut), a
+      // paused one stays paused: nothing here plays, seeks, or repaints a
+      // state the frame is not in
+      PV.clip = { ...PV.clip, start: c.start, end: c.end };
+      if (PV.pending && clipKey(PV.pending) === key) PV.pending = PV.clip;
+      pvShow();
     }
   }
   function pvPlay(clip) {
@@ -834,16 +882,18 @@
     // the drawer scrolls: a stage below its fold is a sound with no frame
     if (typeof box.scrollIntoView === "function") box.scrollIntoView({ block: "nearest" });
     PV.stopped = false; PV.playing = false; clearTimeout(PV.watch);
+    PV.blocked = false; PV.paused = false; PV.free = false; PV.hold = false;
     PV.clip = clip; PV.armed = false; PV.ended = false;
     // an autoplay the browser refused would read as "previewing" forever:
-    // if no time report lands, say so and hand the reader the frame's own ▶
+    // if no playing report lands, say so and hand the reader the frame's own
+    // ▶ (the first playing report disarms this — pvStarted)
     PV.watch = setTimeout(() => {
-      if (PV.clip && !PV.playing && !PV.ended) { PV.blocked = true; pvShow(); }
+      if (PV.clip && !PV.playing && !PV.paused && !PV.ended) { PV.blocked = true; pvShow(); }
     }, 6000);
     if (!PV.win && !PV.pending) {
       // first use: the frame is built now — this ▶ is the click-to-load
       const ifr = document.createElement("iframe");
-      ifr.className = "cz-stagefr";
+      ifr.className = "cz-stagefr"; PV.el = ifr;
       ifr.allow = "autoplay; encrypted-media; picture-in-picture";
       ifr.title = "the preview — one clip of the tape, in the studio";
       ifr.src = `${PV_ORIGIN}/embed/${encodeURIComponent(clip.video_id)}`
@@ -869,24 +919,79 @@
     if (e.source !== PV.win) return;   // the stage hears only its own frame
     if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
     let d; try { d = JSON.parse(e.data); } catch { return; }
-    if (d.event === "onReady" || d.event === "initialDelivery") {
+    // initialDelivery and onReady land together: the ready work runs ONCE
+    if ((d.event === "onReady" || d.event === "initialDelivery") && !PV.ready) {
       PV.ready = true; pvSend("listening");
-      if (PV.stopped || !PV.clip) { PV.stopped = false; pvSend("pauseVideo"); PV.pending = null; }
-      else if (PV.pending) {
+      if (PV.stopped || !PV.clip) {
+        // stopped before it was ready: CUE the last clip's tape at its start
+        // — a cue replaces the autoplay; a pause before playback is ignored
+        PV.stopped = false; PV.pending = null;
+        const at = PV.last || {};
+        PV.vid = at.video_id || PV.vid;
+        pvSend("cueVideoById", [{ videoId: PV.vid, startSeconds: Math.floor(+at.start || 0) }]);
+      } else if (PV.pending) {
         const c = PV.pending; PV.pending = null;
         if (c.video_id === PV.vid) { pvSend("seekTo", [c.start, true]); pvSend("playVideo"); }
         else pvPlay(c);
       }
     }
-    if (d.info && typeof d.info.playerState === "number") {
-      // the reader pressed play inside the stage's own frame after a stop:
-      // that is the stage speaking, and the page player yields to it
-      if (d.info.playerState === 1 && !PV.clip && PV.last) { PV.clip = PV.last; PV.armed = true; PV.ended = false; pagePause(); pvShow(); }
-      if (d.info.playerState === 0 && PV.clip && !PV.ended) { PV.ended = true; PV.armed = false; pvShow(); }
+    const info = d.info && typeof d.info === "object" ? d.info : null;
+    if (!info) return;
+    if (typeof info.currentTime === "number") PV.t = info.currentTime;
+    if (typeof info.playerState === "number" && info.playerState !== PV.state) {
+      PV.state = info.playerState;
+      if (PV.state === 0 || PV.state === 2 || PV.state === 5) PV.hold = false;   // seen silent
+      pvState(PV.state, PV.t);
     }
-    if (d.info && typeof d.info.currentTime === "number") {
-      if (PV.clip && !PV.playing && d.info.playerState === 1) { PV.playing = true; PV.blocked = false; pvShow(); }
-      pvAdvance(d.info.currentTime);
+    if (typeof info.currentTime === "number") {
+      // a seek inside a tape already playing may never change the reported
+      // state: time moving under a playing state is the preview playing
+      // (never while a tape switch settles: the old tape's stale reports)
+      if (PV.clip && !PV.playing && !PV.paused && !PV.ended && !PV.settling && PV.state === 1) { pvStarted(); pvShow(); }
+      pvAdvance(info.currentTime);
+    }
+  }
+  /* the stage frame's own reports, as transitions: the status line says
+     what the frame is actually doing, and one engine plays at a time */
+  function pvStarted() {
+    clearTimeout(PV.watch);
+    PV.playing = true; PV.paused = false; PV.blocked = false;
+  }
+  function pvState(s, t) {
+    if (s === 1) {
+      if (PV.clip && !PV.ended) {
+        // the preview playing: its first report, a resume after the reader
+        // paused the frame, or the reader's ▶ after a refused autoplay
+        pvStarted(); pagePause(); pvShow(); return;
+      }
+      // held silent and not yet seen silent: a play with no reader's hand
+      // in it is the frame's own autoplay landing late — silenced again
+      if (!PV.free && PV.hold && !inFrame(PV.el)) { pvSend("pauseVideo"); return; }
+      // the reader's own ▶ on the frame: the stage is the engine now
+      PV.hold = false; pagePause();
+      const c = PV.free ? null : (PV.clip || PV.last);
+      if (c && t >= c.start - 0.75 && t < c.end - 0.12) {
+        // inside the clip: the preview goes on, bounded by its gate — never
+        // pre-armed; a report inside the clip arms it
+        PV.clip = c; PV.ended = false; PV.armed = false; PV.free = false; pvStarted();
+      } else if (!PV.free) {
+        // outside it: the tape plays, the status says so, no clip is marked
+        if (PV.clip) PV.last = PV.clip;
+        PV.clip = null; PV.ended = false; PV.armed = false; PV.free = true;
+        PV.playing = false; PV.paused = false; PV.blocked = false;
+      }
+      pvShow(); return;
+    }
+    if (s === 2) {
+      // the reader paused the frame mid-preview (the gate's own stop has
+      // already marked its clip played); a free play paused is a stop
+      if (PV.clip && !PV.ended) { PV.playing = false; PV.paused = true; }
+      PV.free = false; pvShow(); return;
+    }
+    if (s === 0) {
+      // the tape's own end ends the preview, or the frame's free play
+      if (PV.clip && !PV.ended) { PV.ended = true; PV.armed = false; }
+      PV.playing = false; PV.paused = false; PV.free = false; pvShow();
     }
   }
   /* the stage's gate, pure over (state, time): "arm" once a report lands
@@ -901,14 +1006,15 @@
   function pvAdvance(t) {
     const a = pvStep(PV, t);
     if (a === "arm") PV.armed = true;
-    else if (a === "stop") { pvSend("pauseVideo"); PV.armed = false; PV.ended = true; pvShow(); }
+    else if (a === "stop") { pvSend("pauseVideo"); PV.armed = false; PV.ended = true; PV.playing = false; PV.hold = true; pvShow(); }
   }
   function pvShow() {
     const now = $("#cz-stagenow"), open = $(".cz-stageopen");
     const c = PV.clip;
-    const what = !c ? "stopped"
+    const what = !c ? (PV.free ? "playing the tape — from the frame’s own ▶, with no clip’s bounds" : "stopped")
       : PV.ended ? "played"
       : PV.blocked ? "the tape hasn’t started — press ▶ on the frame to play it here"
+      : PV.paused ? "paused on the frame — its ▶ goes on"
       : PV.playing ? "previewing" : "loading the tape…";
     const line = !c ? what : `${what} · ${hms(c.start)}–${hms(c.end)}`
         + (c.quote ? ` · “${cut(String(c.quote), 60)}”` : "")
@@ -1260,7 +1366,10 @@
   }
 
   /* ================= MEETING ================= */
-  let YT = { win: null, loaded: false, ready: false, time: 0, pending: null };
+  // `hold` and `state` mirror the stage's (see PV); `el` is the page's
+  // <iframe>, `vid` the tape it holds (cued or playing)
+  let YT = { win: null, el: null, vid: "", loaded: false, ready: false, time: 0, pending: null,
+             hold: false, state: -2 };
   let MINIMAP = null, STICKY_NOW = null;
   function meeting() {
     const art = $(".meeting"); if (!art) return;
@@ -1371,6 +1480,7 @@
       ifr.addEventListener("load", () => { YT.win = ifr.contentWindow; ytSend("listening"); });
       f.classList.remove("facade"); f.innerHTML = ""; f.appendChild(ifr);
       YT.loaded = true; YT.pending = seekTo != null ? seekTo : YT.pending;
+      YT.el = ifr; YT.vid = vid; YT.hold = false;   // the reader asked for this tape
     } else if (seekTo != null) ytSeek(seekTo);
   }
   function ytSend(kind, func, args) {
@@ -1384,7 +1494,7 @@
   }
   function ytSeek(t) {
     pvPause();   // one engine seeks (specs/23 B2)
-    YT.hush = false;
+    YT.hold = false;
     YT.time = t; strip(t);
     // command-ready only after onReady; a click during the load gap stashes
     // into pending instead of posting into the void (and being lost)
@@ -1398,23 +1508,48 @@
     if (e.source !== YT.win) return;
     if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
     let d; try { d = JSON.parse(e.data); } catch { return; }
-    if (d.event === "onReady" || d.event === "initialDelivery") {
+    // initialDelivery and onReady land together: the ready work runs ONCE —
+    // a second run would fire a stashed seek onto a tape the first switched
+    if ((d.event === "onReady" || d.event === "initialDelivery") && !YT.ready) {
       YT.ready = true; ytSend("listening");
-      // the stage spoke while this player was loading: it stays silent
-      // until the reader asks it to play (one engine seeks — specs/23 B2)
-      if (YT.hush) { YT.hush = false; YT.pending = null; ytSend("cmd", "pauseVideo", []); return; }
-      // a cross-meeting switch requested before the player was ready (a cite
-      // tapped during the load gap) loads now, ahead of any stashed same-tape seek
-      if (REELPLAY && REELPLAY.pending) {
-        const pv = REELPLAY.pending; REELPLAY.pending = null; REELPLAY.settling = true;
+      const pv = REELPLAY && REELPLAY.pending;
+      if (REELPLAY) REELPLAY.pending = null;
+      if (YT.hold) {
+        // the stage spoke while this player was loading: it stays silent
+        // until the reader asks it to play (one engine seeks — specs/23 B2),
+        // CUED where it was asked to be — the place kept, the play dropped
+        const vid = pv ? pv.vid : YT.vid, at = pv ? pv.start : YT.pending;
+        YT.pending = null;
+        if (vid) { YT.vid = vid; ytSend("cmd", "cueVideoById", [{ videoId: vid, startSeconds: +at || 0 }]); }
+        else ytSend("cmd", "pauseVideo", []);
+      } else if (pv) {
+        // a cross-meeting switch requested before the player was ready (a
+        // cite tapped during the load gap) loads now; a stashed same-tape
+        // seek belonged to the tape it abandons
+        YT.pending = null; YT.vid = pv.vid; REELPLAY.settling = true;
         if (typeof setTimeout === "function")
           setTimeout(() => { if (REELPLAY) REELPLAY.settling = false; }, 500);
         ytSend("cmd", "loadVideoById", [{ videoId: pv.vid, startSeconds: pv.start }]);
       } else if (YT.pending != null) { const p = YT.pending; YT.pending = null; ytSeek(p); }
     }
-    // the reader pressed play inside the page's own frame while the stage
-    // was speaking: the page is the engine now, the stage yields
-    if (d.info && d.info.playerState === 1 && PV.clip && !PV.ended) pvPause();
+    if (d.info && typeof d.info.playerState === "number" && d.info.playerState !== YT.state) {
+      YT.state = d.info.playerState;
+      if (YT.state === 0 || YT.state === 2 || YT.state === 5) YT.hold = false;   // seen silent
+      else if (YT.state === 1) {
+        // held silent and not yet seen so: a play with no reader's hand in
+        // it is an autoplay landing late — silenced again
+        if (YT.hold && !inFrame(YT.el)) ytSend("cmd", "pauseVideo", []);
+        else {
+          // a play in the page's own frame: the page is the engine — the
+          // stage yields, and a reel the stage paused goes on from its clip
+          YT.hold = false;
+          if (PV.clip || PV.free) pvPause();
+          if (REELPLAY && REELPLAY.paused) {
+            REELPLAY.paused = false; REELPLAY.active = true; REELPLAY.armed = false; reelShow();
+          }
+        }
+      }
+    }
     if (d.info && typeof d.info.currentTime === "number") {
       YT.time = d.info.currentTime;
       followAlong(YT.time); strip(YT.time); tick(YT.time);
@@ -2225,35 +2360,11 @@
     }
     return null;
   }
-  /* the tape's own words at a cut: the pressed transcript.txt, one fetch
-     per meeting (cached beside the trim bounds), the line at or before
-     the cut's start. A clip that is a moment keeps the moment's quote. */
-  const SEGL = {};
-  function segLines(pid) {
-    if (!pid) return Promise.resolve([]);
-    if (SEGL[pid]) return Promise.resolve(SEGL[pid]);
-    return fetch(`${BASE}/m/${encodeURIComponent(pid)}/transcript.txt`)
-      .then(r => r.ok ? r.text() : "").catch(() => "")
-      .then(tx => { const l = parseSegLines(tx); if (l.length) SEGL[pid] = l; return l; });
-  }
-  function parseSegLines(tx) {
-    const out = [];
-    for (const line of String(tx || "").split("\n")) {
-      const m = /^\[(\d+):(\d\d)(?::(\d\d))?\]\s*(.*)$/.exec(line);
-      if (!m) continue;
-      const t = m[3] == null ? +m[1] * 60 + +m[2] : +m[1] * 3600 + +m[2] * 60 + +m[3];
-      out.push({ t, text: m[4].replace(/^[^:]{1,40}:\s+/, "").trim() });
-    }
-    return out.sort((a, b) => a.t - b.t);
-  }
-  const lineAt = (lines, t) => { let hit = null;
-    for (const l of lines) { if (l.t <= Math.floor(t) + 0.01) hit = l; else break; }
-    return hit ? hit.text : ""; };
   async function quoteCuts(clips) {
     const need = [...new Set(clips.filter(c => !c.quote && c.pid).map(c => c.pid))];
     const got = {};
     await Promise.all(need.map(async pid => { got[pid] = await segLines(pid); }));
-    for (const c of clips) if (!c.quote && got[c.pid]) c.quote = cut(lineAt(got[c.pid], c.start), 120);
+    for (const c of clips) if (!c.quote && got[c.pid]) c.quote = cut((lineAt(got[c.pid], c.start) || {}).text || "", 120);
   }
   function nearestMoment(moments, t) {
     // a shared clip's start is the moment's padded window start, so match the
@@ -2441,8 +2552,10 @@
     // stale times for a beat — they belong to another timeline and could arm or
     // skip the new clip — so settle briefly, then let the armed gate re-arm.
     REELPLAY.vid = vid;
+    // the reader asked the page for a tape: it is no longer held silent
+    if (typeof YT !== "undefined") YT.hold = false;
     if (typeof YT !== "undefined" && YT.win && YT.ready) {
-      REELPLAY.settling = true;
+      REELPLAY.settling = true; YT.vid = vid;
       if (typeof setTimeout === "function")
         setTimeout(() => { if (REELPLAY) REELPLAY.settling = false; }, 500);
       ytSend("cmd", "loadVideoById", [{ videoId: vid, startSeconds: c.start }]);
@@ -2518,14 +2631,33 @@
      never a throw. */
 
   const PAPER_V = "1";
-  const PAPER_VS = ["1", "2"];
+  const PAPER_VS = ["1", "2", "3"];
+  /* the layouts a block may ask for (specs/23 C1) — an enum, never data:
+       lead — the block is the paper's lead: full width, the large treatment
+       head — the block stands as a section head: its name, over a rule
+       half — half width; two halves in a row sit side by side
+     A block with no layout reads exactly as it always did. */
+  const PAPER_LAYOUTS = ["lead", "head", "half"];
+  const LAYOUT_LABEL = { lead: "lead story", head: "section head", half: "half width" };
+  /* the C2 kinds (specs/23 C2) — refs only, every one:
+       quote  — a transcript line by (pid, t); its words are read off the
+                pressed tape at render, never stored
+       doc    — one of a meeting's own filings (agenda, minutes…) by its id
+       digest — "what changed": an issue and a window of its latest
+                appearances, computed at render from its timeline */
+  const C2_KINDS = ["quote", "doc", "digest"];
+  const DOC_REF = /^[\w:.-]{1,160}$/;     // a document id, e.g. doc:budget
+  const DIGEST_MAX = 12;
   /* which link version a paper needs: v=1 is the shipped P1 grammar
      (stories + reels) and stays byte-identical for those papers forever;
      v=2 marks a paper carrying kinds a v1 reader cannot represent (notes,
      charts) — the shipped reader then shows its honest "shared from a newer
      version" message instead of silently rendering a mutilated paper. */
-  const paperV = p => p.blocks.some(
-    b => b.kind === "note" || b.kind === "chart") ? "2" : "1";
+  // v=3 is the rich tier whole — layouts (C1) and the three ref kinds (C2)
+  // shipped in ONE edition (v2.1.14), so no reader ever holds a decoder that
+  // knows one grammar and not the other; a fourth grammar mints v=4
+  const paperV = p => p.blocks.some(b => b.layout || C2_KINDS.includes(b.kind)) ? "3"
+    : p.blocks.some(b => b.kind === "note" || b.kind === "chart") ? "2" : "1";
   /* does anything actually TRAVEL — a title, or a block that survives
      portablePaper (an empty note does not). The share row, the title
      handler and the note handler all read THIS one truth, so typing across
@@ -2534,7 +2666,11 @@
      needs a repaint on exactly that boundary). */
   const paperHasLive = d => !!(d.title
     || d.blocks.some(b => b.kind !== "note" || b.text.trim()));
-  const PAPER_KEY = "cz-paper";        // the one draft this browser keeps
+  const PAPER_KEY = "cz-paper";        // the one draft this browser kept (P1–P3) — read once, migrated, retired
+  const PAPERS_KEY = "cz-papers";      // the shelf: every paper this browser keeps, and which one is open (C1)
+  const PAPERS_MAX = 24;               // papers on one shelf — a browser's worth, not a library's
+  let PAPERS_BLANK = null;             // a fresh reader's unsaved shelf: one id for the page's life
+  const PAPER_ID = /^[a-z0-9]{4,12}$/;  // a paper's own id on the shelf — local, never travels
   const PAPER_TITLE_MAX = 200;
   const PAPER_MAX_BLOCKS = 64;
   const PAPER_MAX_CLIPS = 100;         // per reel block — matches the store's cap
@@ -2570,19 +2706,106 @@
     .replace(/\r\n?/g, "\n")
     .replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, ""), PAPER_NOTE_MAX);
 
+  /* the shelf (specs/23 C1): {active, papers:[{id, title, blocks}]} — an
+     ORDERED list, so the switcher paints in a stable order, and one pointer.
+     Total over whatever is stored (a hand-edited value, a paper with no id):
+     bad entries drop, an empty shelf grows one blank paper, a dangling
+     pointer falls to the first. The single P1 draft (`cz-paper`) migrates
+     in ONCE, the loadReel way — read, kept whole as the first paper, then
+     its key removed so it can never resurrect over a later edit. */
+  const paperId = () => (Date.now().toString(36).slice(-4)
+    + Math.random().toString(36).slice(2, 6)).replace(/[^a-z0-9]/g, "0").slice(0, 8);
+  function readPapers() {
+    let sh = null;
+    try { sh = JSON.parse(localStorage.getItem(PAPERS_KEY) || "null"); } catch { sh = null; }
+    if (!sh || typeof sh !== "object" || !Array.isArray(sh.papers)) {
+      let raw = null, old = null;
+      try { raw = localStorage.getItem(PAPER_KEY); } catch { raw = null; }
+      try { old = JSON.parse(raw || "null"); } catch { old = null; }
+      // nothing stored at all: a blank shelf held in memory — a READ mints
+      // and writes nothing for a reader who never makes anything; the first
+      // real save writes the shelf, under this same id
+      const first = { id: raw == null ? (PAPERS_BLANK ||= paperId()) : paperId(), ...normalizePaper(old) };
+      sh = { active: first.id, papers: [first] };
+      // the sweep: an old draft moves in once, and its key goes only once
+      // the shelf holds it
+      if (raw != null && writePapers(sh)) { try { localStorage.removeItem(PAPER_KEY); } catch { /* private mode */ } }
+      return sh;
+    }
+    const seen = new Set();
+    const papers = [];
+    for (const p of sh.papers) {
+      if (papers.length >= PAPERS_MAX) break;
+      if (!p || typeof p !== "object" || typeof p.id !== "string"
+          || !PAPER_ID.test(p.id) || seen.has(p.id)) continue;
+      seen.add(p.id);
+      papers.push({ id: p.id, ...normalizePaper(p) });
+    }
+    if (!papers.length) papers.push({ id: paperId(), title: "", blocks: [] });
+    const active = papers.some(p => p.id === sh.active) ? sh.active : papers[0].id;
+    return { active, papers };
+  }
+  function writePapers(sh) {
+    try { localStorage.setItem(PAPERS_KEY, JSON.stringify(sh)); return true; }
+    catch { return false; }
+  }
+  /* the OPEN paper — what every panel, editor and render means by "the
+     draft". Its shape is unchanged from P1: {title, blocks}. */
   function readPaper() {
-    let p = null;
-    try { p = JSON.parse(localStorage.getItem(PAPER_KEY) || "null"); }
-    catch { p = null; }
-    return normalizePaper(p);
+    const sh = readPapers();
+    const p = sh.papers.find(x => x.id === sh.active) || sh.papers[0];
+    return { title: p.title, blocks: p.blocks };
   }
   /* returns whether the draft actually held — a browser that blocks storage
      gets told the truth by the callers, not a success toast over a void. Any
      change also retires the last short link: it names the OLD paper. */
   function savePaper(p) {
     PAPER_SHORT = "";
-    try { localStorage.setItem(PAPER_KEY, JSON.stringify(p)); return true; }
-    catch { return false; }
+    const sh = readPapers();
+    const np = normalizePaper(p);
+    const i = sh.papers.findIndex(x => x.id === sh.active);
+    if (i < 0) sh.papers.unshift({ id: sh.active, ...np });
+    else sh.papers[i] = { id: sh.active, ...np };
+    return writePapers(sh);
+  }
+  /* the shelf's own acts: a new paper opens blank and becomes the open one;
+     switching changes the pointer and nothing else; deleting asks when
+     there is anything to lose, and the shelf never stands empty. Every one
+     retires the minted short link (it named the paper that was open) and
+     repaints both surfaces. */
+  function newPaper() {
+    const sh = readPapers();
+    if (sh.papers.length >= PAPERS_MAX) {
+      toast(`this browser keeps ${PAPERS_MAX} papers — delete one to start another`); return; }
+    const p = { id: paperId(), title: "", blocks: [] };
+    sh.papers.push(p); sh.active = p.id;
+    if (!writePapers(sh)) { toast("this browser blocks storage — a new paper can’t be kept here"); return; }
+    retireShortOut(); refreshPaperSummary({ act: "title" }); renderPaperNow();
+    toast("a new paper — name it, then add to it");
+  }
+  function switchPaper(id) {
+    const sh = readPapers();
+    if (!sh.papers.some(p => p.id === id) || sh.active === id) return;
+    sh.active = id;
+    if (!writePapers(sh)) { toast("this browser blocks storage — the switch didn’t hold"); return; }
+    retireShortOut(); refreshPaperSummary({ act: "pshelf" }); renderPaperNow();
+  }
+  function deletePaper() {
+    const seen = readPapers();
+    const cur = seen.papers.find(p => p.id === seen.active); if (!cur) return;
+    const id = cur.id;
+    if ((cur.title || cur.blocks.length)
+        && !window.confirm(`Delete ${cur.title ? `“${cur.title}”` : "this untitled paper"}? It lives only in this browser; a link or a paper.json you shared keeps reading.`)) return;
+    // the confirm blocked; another tab may have written meanwhile — delete
+    // the paper the reader named from the shelf as it stands NOW
+    const sh = readPapers();
+    if (!sh.papers.some(p => p.id === id)) { toast("that paper was already deleted in another tab"); refreshPaperSummary({ act: "pshelf" }); renderPaperNow(); return; }
+    sh.papers = sh.papers.filter(p => p.id !== id);
+    if (!sh.papers.length) sh.papers.push({ id: paperId(), title: "", blocks: [] });
+    if (!sh.papers.some(p => p.id === sh.active)) sh.active = sh.papers[0].id;
+    if (!writePapers(sh)) { toast("this browser blocks storage — the delete didn’t hold"); return; }
+    retireShortOut(); refreshPaperSummary({ act: "pshelf" }); renderPaperNow();
+    toast("paper deleted — the record is untouched");
   }
 
   /* total: whatever arrives — a draft, a decoded link, a stored paper, a
@@ -2600,6 +2823,11 @@
     return out;
   }
   function normalizeBlock(b) {
+    const nb = normalizeKind(b);
+    if (nb && PAPER_LAYOUTS.includes(b.layout)) nb.layout = b.layout;
+    return nb;
+  }
+  function normalizeKind(b) {
     if (!b || typeof b !== "object") return null;
     if (b.kind === "story" && b.story === "meeting" && PAPER_REF.test(b.pid || "")) {
       const nb = { kind: "story", story: "meeting", pid: b.pid };
@@ -2643,6 +2871,23 @@
     if (b.kind === "chart" && (b.chart === "votes" || b.chart === "topics"
         || b.chart === "framing"))
       return { kind: "chart", chart: b.chart };
+    if (b.kind === "quote" && PAPER_REF.test(b.pid || "") && isFinite(b.t) && b.t >= 0) {
+      const nb = { kind: "quote", pid: b.pid, t: r1(b.t) };
+      // the words and the meeting's name ride the DRAFT only, for the panel
+      for (const k of ["text", "title", "spk"]) if (typeof b[k] === "string") nb[k] = b[k];
+      return nb;
+    }
+    if (b.kind === "doc" && PAPER_REF.test(b.pid || "") && DOC_REF.test(b.doc || "")) {
+      const nb = { kind: "doc", pid: b.pid, doc: b.doc };
+      for (const k of ["title", "dkind"]) if (typeof b[k] === "string") nb[k] = b[k];
+      return nb;
+    }
+    if (b.kind === "digest" && PAPER_REF.test(b.slug || "")) {
+      const n = Math.max(1, Math.min(DIGEST_MAX, Math.floor(+b.n) || 3));
+      const nb = { kind: "digest", slug: b.slug, n };
+      if (typeof b.name === "string") nb.name = b.name;
+      return nb;
+    }
     return null;
   }
 
@@ -2651,6 +2896,7 @@
      and the export's block list carry none of it — a reader's page enriches
      from the record's own planes, so a paper can never assert a title the
      record would not. */
+  const withLayout = (t, b) => (b.layout ? { ...t, layout: b.layout } : t);
   function portablePaper(p) {
     p = normalizePaper(p);
     return {
@@ -2658,9 +2904,12 @@
       title: p.title,
       // an empty note is a draft-in-progress; no traveling form carries one
       blocks: p.blocks.filter(b => b.kind !== "note" || b.text.trim())
-        .map(b => b.kind === "reel"
+        .map(b => withLayout(b.kind === "reel"
         ? { kind: "reel",
             clips: b.clips.map(c => ({ pid: c.pid, start: r1(c.start), end: r1(c.end) })) }
+        : b.kind === "quote" ? { kind: "quote", pid: b.pid, t: r1(b.t) }
+        : b.kind === "doc" ? { kind: "doc", pid: b.pid, doc: b.doc }
+        : b.kind === "digest" ? { kind: "digest", slug: b.slug, n: b.n }
         : b.kind === "note"
           ? { kind: "note", text: b.text }
         : b.kind === "chart"
@@ -2671,7 +2920,7 @@
               : { kind: "chart", chart: b.chart })
         : b.story === "issue"
           ? { kind: "story", story: "issue", slug: b.slug }
-          : { kind: "story", story: "meeting", pid: b.pid }),
+          : { kind: "story", story: "meeting", pid: b.pid }, b)),
     };
   }
 
@@ -2692,14 +2941,22 @@
             `${encodeURIComponent(c.pid)}:${r1(c.start)}-${r1(c.end)}`).join("~")
       : b.kind === "note"
         ? "n." + encodeURIComponent(encodeURIComponent(b.text))
+      // C2: q.<pid>:<t> · d.<pid>~<doc id> (a doc id may hold ":") · g.<slug>:<n>
+      : b.kind === "quote" ? `q.${encodeURIComponent(b.pid)}:${r1(b.t)}`
+      : b.kind === "doc" ? `d.${encodeURIComponent(b.pid)}~${encodeURIComponent(b.doc)}`
+      : b.kind === "digest" ? `g.${encodeURIComponent(b.slug)}:${b.n}`
       : b.kind === "chart"
         ? "c." + b.chart + (b.slug || b.pid
             ? "." + encodeURIComponent(b.slug || b.pid) : "")
       : b.story === "issue" ? "i." + encodeURIComponent(b.slug)
       : "m." + encodeURIComponent(b.pid));
+    // layouts ride a separate `l=` (C1): <block index>:<layout> pairs, so a
+    // v1/v2 link's `b=` never changes shape; a paper carrying one is v=3
+    const lays = p.blocks.map((b, i) => b.layout ? `${i}:${b.layout}` : "").filter(Boolean);
     return `v=${paperV(p)}`
       + (p.title ? `&t=${encodeURIComponent(p.title)}` : "")
-      + (parts.length ? `&b=${parts.join(",")}` : "");
+      + (parts.length ? `&b=${parts.join(",")}` : "")
+      + (lays.length ? `&l=${lays.join(",")}` : "");
   }
   function paperShareURL(p) {
     return `${location.origin}${BASE}/p?${encodePaperQS(p)}`;
@@ -2716,15 +2973,35 @@
                   id: /^[0-9a-f]{16}$/.test(id) ? id : "",
                   title: cut(q.get("t") || "", PAPER_TITLE_MAX),
                   blocks: [] };
-    for (const part of (q.get("b") || "").split(",")) {
+    const at = [];   // each decoded block's index among the link's parts
+    const parts = (q.get("b") || "").split(",");
+    for (let pi = 0; pi < parts.length; pi++) {
+      const part = parts[pi];
       if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
+      const before = out.blocks.length;
       const dot = part.indexOf(".");
       if (dot < 1) continue;
       const kind = part.slice(0, dot), rest = part.slice(dot + 1);
+      decodePart(kind, rest, out);
+      if (out.blocks.length > before) at.push(pi);
+    }
+    // layouts (C1): a pair that names no decoded block, or an unknown
+    // layout, is simply not applied — a mangled l= costs a layout, never
+    // a throw (decodeReel's law)
+    for (const pair of (q.get("l") || "").split(",")) {
+      const m = /^(\d{1,3}):([a-z]+)$/.exec(pair.trim()); if (!m) continue;
+      const bi = at.indexOf(+m[1]);
+      if (bi >= 0 && PAPER_LAYOUTS.includes(m[2])) out.blocks[bi].layout = m[2];
+    }
+    return out;
+  }
+  /* one part of a link's b=, decoded into out.blocks (or not) */
+  function decodePart(kind, rest, out) {
+    {
       if (kind === "m" || kind === "i") {
         let ref = "";
-        try { ref = decodeURIComponent(rest).trim(); } catch { continue; }
-        if (!PAPER_REF.test(ref)) continue;
+        try { ref = decodeURIComponent(rest).trim(); } catch { return; }
+        if (!PAPER_REF.test(ref)) return;
         out.blocks.push(kind === "m"
           ? { kind: "story", story: "meeting", pid: ref }
           : { kind: "story", story: "issue", slug: ref });
@@ -2748,12 +3025,33 @@
         // the second decode of the note's double coat (the first was
         // URLSearchParams's, above); a bad escape drops the block, never throws
         let text = "";
-        try { text = noteText(decodeURIComponent(rest)); } catch { continue; }
+        try { text = noteText(decodeURIComponent(rest)); } catch { return; }
         if (text.trim()) out.blocks.push({ kind: "note", text });
+      } else if (kind === "q") {
+        const colon = rest.lastIndexOf(":"); if (colon < 1) return;
+        let pid = "";
+        try { pid = decodeURIComponent(rest.slice(0, colon)).trim(); } catch { return; }
+        const t = parseFloat(rest.slice(colon + 1));
+        if (!PAPER_REF.test(pid) || !isFinite(t) || t < 0) return;
+        out.blocks.push({ kind: "quote", pid, t: r1(t) });
+      } else if (kind === "d") {
+        const tilde = rest.indexOf("~"); if (tilde < 1) return;
+        let pid = "", doc = "";
+        try { pid = decodeURIComponent(rest.slice(0, tilde)).trim();
+              doc = decodeURIComponent(rest.slice(tilde + 1)).trim(); } catch { return; }
+        if (!PAPER_REF.test(pid) || !DOC_REF.test(doc)) return;
+        out.blocks.push({ kind: "doc", pid, doc });
+      } else if (kind === "g") {
+        const colon = rest.lastIndexOf(":"); if (colon < 1) return;
+        let slug = "";
+        try { slug = decodeURIComponent(rest.slice(0, colon)).trim(); } catch { return; }
+        const n = parseInt(rest.slice(colon + 1), 10);
+        if (!PAPER_REF.test(slug) || !(n >= 1 && n <= DIGEST_MAX)) return;
+        out.blocks.push({ kind: "digest", slug, n });
       } else if (kind === "c") {
         const dot2 = rest.indexOf(".");
         const chart = dot2 < 0 ? rest : rest.slice(0, dot2);
-        if (!PAPER_CHARTS.includes(chart)) continue;
+        if (!PAPER_CHARTS.includes(chart)) return;
         if (dot2 < 0) {
           // bare forms: votes, topics, framing (the whole record) — reach
           // needs its issue, so a bare reach is a mangle, not a chart
@@ -2761,8 +3059,8 @@
         } else {
           let ref = "";
           try { ref = decodeURIComponent(rest.slice(dot2 + 1)).trim(); }
-          catch { continue; }
-          if (!PAPER_REF.test(ref)) continue;
+          catch { return; }
+          if (!PAPER_REF.test(ref)) return;
           if (chart === "reach")
             out.blocks.push({ kind: "chart", chart: "reach", slug: ref });
           else if (chart === "framing")
@@ -2771,7 +3069,6 @@
         }
       }
     }
-    return out;
   }
 
   /* arrange: the panel's ↑ ↓ ✕, one function. Index-addressed against the
@@ -2877,6 +3174,55 @@
     toast("added to your paper");
   }
   function addPageToPaper() { return addStoryRef(pageStoryRef()); }
+  /* the C2 adds (refs only): a line by (pid, t) — its words ride the draft
+     for the panel's label, never the traveling form; a document by id; a
+     digest by issue and window. Each lands at `at` (the editor) or the end. */
+  async function addQuoteRef(pid, t, at, text) {
+    if (!PAPER_REF.test(pid || "") || !isFinite(t)) return;
+    const dup = p => p.blocks.some(b => b.kind === "quote" && b.pid === pid && r1(b.t) === r1(t));
+    if (dup(readPaper())) { toast("this line is already quoted in your paper"); return; }
+    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`) || {};
+    const nb = normalizeBlock({ kind: "quote", pid, t, text: text || "", title: m.title || "" });
+    if (!nb) return;
+    const p = readPaper();
+    if (dup(p)) { toast("this line is already quoted in your paper"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) { toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) { toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast("quoted — the words are read from the record when your paper renders");
+  }
+  async function addDocRef(pid, doc, at) {
+    if (!PAPER_REF.test(pid || "") || !DOC_REF.test(doc || "")) return;
+    const dup = p => p.blocks.some(b => b.kind === "doc" && b.pid === pid && b.doc === doc);
+    if (dup(readPaper())) { toast("this document is already in your paper"); return; }
+    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`) || {};
+    const d = (m.documents || []).find(x => x && x.doc_id === doc) || {};
+    const nb = normalizeBlock({ kind: "doc", pid, doc, title: d.title || "", dkind: d.kind || "" });
+    if (!nb) return;
+    const p = readPaper();
+    if (dup(p)) { toast("this document is already in your paper"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) { toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) { toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast("document added");
+  }
+  async function addDigestRef(slug, at, n) {
+    if (!PAPER_REF.test(slug || "")) return;
+    const dup = p => p.blocks.some(b => b.kind === "digest" && b.slug === slug);
+    if (dup(readPaper())) { toast("this issue’s digest is already in your paper"); return; }
+    const it = await getJSON(`${BASE}/issues/${encodeURIComponent(slug)}.json`) || {};
+    const nb = normalizeBlock({ kind: "digest", slug, n: n || 3, name: it.name || "" });
+    if (!nb) return;
+    const p = readPaper();
+    if (dup(p)) { toast("this issue’s digest is already in your paper"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) { toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) { toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast("digest added — it reads the issue’s timeline when your paper renders");
+  }
   /* a card's second press (A2): the story leaves. Index-addressed against
      the draft as it is now, like every arrange. */
   function removeStoryRef(ref) {
@@ -2971,13 +3317,13 @@
     let title = "", blocks = [];
     if (t === "rolls") {
       title = "the roll calls, watched";
-      blocks = [{ kind: "chart", chart: "votes" },
+      blocks = [{ kind: "chart", chart: "votes", layout: "lead" },
                 { kind: "chart", chart: "framing" },
                 { kind: "note", text: "" }];
     } else if (t === "issue" && ref && ref.story === "issue") {
       const it = await getJSON(`${BASE}/issues/${encodeURIComponent(ref.slug)}.json`) || {};
       title = `${it.name || ref.slug}, watched`;
-      blocks = [{ kind: "story", story: "issue", slug: ref.slug,
+      blocks = [{ kind: "story", story: "issue", slug: ref.slug, layout: "lead",
                   name: it.name || "", n_meetings: it.n_meetings,
                   first_seen: it.first_seen || "", last_seen: it.last_seen || "" },
                 { kind: "chart", chart: "reach", slug: ref.slug, name: it.name || "" },
@@ -2985,7 +3331,7 @@
     } else if (t === "meeting" && ref && ref.story === "meeting") {
       const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(ref.pid)}.json`) || {};
       title = `${m.title || ref.pid}, covered`;
-      blocks = [{ kind: "story", story: "meeting", pid: ref.pid,
+      blocks = [{ kind: "story", story: "meeting", pid: ref.pid, layout: "lead",
                   title: m.title || "", date: m.date || "", body: m.body || "",
                   town: m.town || "", thumb: m.thumb || "" },
                 { kind: "chart", chart: "framing", pid: ref.pid, title: m.title || "" },
@@ -3010,8 +3356,10 @@
     return true;
   }
   function clearPaper() {
-    try { localStorage.removeItem(PAPER_KEY); } catch { /* private mode */ }
-    retireShortOut();   // removeItem bypasses savePaper — retire here too
+    // the open paper empties and stays on the shelf (delete is its own act)
+    if (!savePaper({ title: "", blocks: [] })) {
+      toast("this browser blocks storage — the change didn’t hold"); return; }
+    retireShortOut();
     refreshPaperSummary(); schedulePaperRender();
     toast("draft cleared — the record is untouched");
   }
@@ -3039,7 +3387,18 @@
         + "own words. The share link renders it anywhere.",
       share: paperShareURL(p),
       blocks: p.blocks.filter(b => b.kind !== "note" || b.text.trim())
-        .map(b => b.kind === "reel"
+        .map(b => withLayout(b.kind === "quote"
+        ? { kind: "quote", pid: b.pid, t: r1(b.t),
+            computed: "the line is read from the record's own transcript at render",
+            url: `${location.origin}${BASE}/m/${b.pid}#t${Math.floor(b.t)}` }
+        : b.kind === "doc"
+        ? { kind: "doc", pid: b.pid, doc: b.doc, title: b.title || "",
+            url: `${location.origin}${BASE}/m/${b.pid}` }
+        : b.kind === "digest"
+        ? { kind: "digest", slug: b.slug, n: b.n, name: b.name || "",
+            computed: "from the issue's own timeline at render",
+            url: `${location.origin}${BASE}/i/${b.slug}` }
+        : b.kind === "reel"
         ? { kind: "reel", runtime: reelRuntime(b.clips),
             play: reelShareURL(b.clips),
             clips: b.clips.map(c => ({ pid: c.pid, start: r1(c.start),
@@ -3057,7 +3416,7 @@
               url: `${location.origin}${BASE}/i/${b.slug}` }
           : { kind: "story", story: "meeting", pid: b.pid, title: b.title || "",
               date: b.date || "", body: b.body || "", town: b.town || "",
-              url: `${location.origin}${BASE}/m/${b.pid}` }),
+              url: `${location.origin}${BASE}/m/${b.pid}` }, b)),
     };
   }
   function downloadPaper(p) {
@@ -3319,26 +3678,30 @@
       else if (b.kind === "story" && b.story === "issue") islugs.add(b.slug);
       else if (b.kind === "chart" && b.chart === "framing" && b.pid) mpids.add(b.pid);
       else if (b.kind === "chart" && b.chart === "reach") islugs.add(b.slug);
+      else if (b.kind === "quote" || b.kind === "doc") mpids.add(b.pid);
+      else if (b.kind === "digest") islugs.add(b.slug);
     }
     for (const b of doc.blocks)
       if (b.kind === "reel") b.clips.forEach(c => mpids.add(c.pid));
     const wantVotes = doc.blocks.some(b => b.kind === "chart" && b.chart === "votes");
     const wantAnalytics = doc.blocks.some(b => b.kind === "chart"
       && (b.chart === "topics" || (b.chart === "framing" && !b.pid)));
-    // a reel's cuts that are not moments quote the tape's own words — one
-    // transcript.txt per reel meeting, fetched beside the planes
-    const reelPidsHere = [...new Set(doc.blocks.filter(b => b.kind === "reel")
-      .flatMap(b => b.clips.map(c => c.pid)))].slice(0, PAPER_MAX_CLIPS);
+    // the tape's own words, once per meeting: a reel's cuts that are not
+    // moments, and every pull-quote, read their line off transcript.txt,
+    // fetched beside the planes
+    const linePids = [...new Set(doc.blocks.flatMap(b =>
+      b.kind === "reel" ? b.clips.map(c => c.pid) : b.kind === "quote" ? [b.pid] : []))]
+      .slice(0, PAPER_MAX_CLIPS);
     const [m, it, votesPlane, analytics, lineSets] = await Promise.all([
       fetchPlanes(mpids, "meetings", PAPER_MAX_BLOCKS + PAPER_MAX_CLIPS),
       fetchPlanes(islugs, "issues", PAPER_MAX_BLOCKS),
       wantVotes ? getJSON(`${BASE}/votes.json`) : Promise.resolve(null),
       wantAnalytics ? getJSON(`${BASE}/analytics.json`) : Promise.resolve(null),
-      Promise.all(reelPidsHere.map(pid => segLines(pid).then(l => [pid, l]))),
+      Promise.all(linePids.map(pid => segLines(pid).then(l => [pid, l]))),
     ]);
     if (gen !== PAPER_GEN) return;     // a newer render superseded this one
     const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
-    const lines = {}; for (const [pid, l] of lineSets) if (l.length) lines[pid] = l;
+    const lines = {}; for (const [pid, l] of lineSets) if (l === null || l.length) lines[pid] = l;
     const aux = { votes: votesPlane, analytics, lines };
     // the on-page editor (specs/23 A3): the DRAFT, in the studio, renders
     // as itself with the arranging chrome on it — a handle, ↑ ↓, ✕ per
@@ -3346,6 +3709,9 @@
     // shared or stored paper never does: it stays exactly the reader.
     const editing = from === "draft" && shownMode() === "studio";
     el.classList.toggle("cz-editing", editing);
+    // the print sheet spells every relative citation out whole (origin +
+    // path) — the origin rides a custom property, not the markup
+    el.style.setProperty("--site", JSON.stringify(location.origin));
     if (editing) {
       setTimeout(pvShow, 0);   // the stage's mark on a reel row survives the repaint
       // the draft may have moved under the awaits (a keystroke on this
@@ -3359,7 +3725,7 @@
       doc = fresh;
       const n = doc.blocks.length;
       const rows = doc.blocks.map((b, i) => edSlot(i)
-        + edRow(renderPaperBlock(b, mby, iby, tried, aux) || paperGone("a block"), b, i, n))
+        + edRow(withLayoutHTML(renderPaperBlock(b, mby, iby, tried, aux) || paperGone("a block"), b, mby, iby), b, i, n))
         .join("") + edSlot(n);
       const keep = captureEdFocus(el) || captureEdPanel(el);
       el.innerHTML = edHead(doc) + rows;
@@ -3375,8 +3741,8 @@
             ? "served from the share store — content-addressed and read-only; the editor holds the original"
             : "carried whole in the link you followed — no server held it"}</p>
       </header>`;
-    const blocks = doc.blocks.map(b => renderPaperBlock(b, mby, iby, tried, aux))
-      .filter(Boolean).join("");
+    const blocks = paintLayouts(doc.blocks.map(b =>
+      [b, renderPaperBlock(b, mby, iby, tried, aux)]).filter(x => x[1]), mby, iby);
     // a title-only paper is a sanctioned form — say what it is, not that its
     // (nonexistent) blocks were curated away
     setTimeout(pvShow, 0);     // the stage's mark on a reel row survives the repaint
@@ -3388,6 +3754,158 @@
         : `<p class="hint">This paper is a title so far — its editor hasn’t
             added stories or reels yet. The <a href="${BASE}/">record
             itself</a> is one link up.</p>`));
+  }
+  /* a block's section-head form (layout "head"): its name over a rule —
+     a story's title linked into the record, a note's first line, a chart's
+     or a reel's own kicker. Null when the plane that names it is not here
+     (the ordinary render then says so in place). */
+  function renderHead(b, mby, iby) {
+    let text = "", href = "";
+    if (b.kind === "story" && b.story === "meeting") {
+      const m = mby[b.pid]; if (!m) return null;
+      text = m.title || b.pid; href = `${BASE}/m/${b.pid}`;
+    } else if (b.kind === "story" && b.story === "issue") {
+      const it = iby[b.slug]; if (!it) return null;
+      text = it.name || b.slug; href = `${BASE}/i/${b.slug}`;
+    } else if (b.kind === "note") {
+      text = (b.text || "").split("\n").find(l => l.trim()) || "";
+      if (!text) return null;
+    } else if (b.kind === "chart") text = chartRowLabel(b).replace(/^▤ /, "");
+    else if (b.kind === "reel") text = `a reel — ${b.clips.length} moment${b.clips.length > 1 ? "s" : ""}`;
+    else if (b.kind === "quote") {
+      const m = mby[b.pid]; if (!m) return null;
+      text = `${m.title || b.pid} · ${hms(b.t)}`; href = `${BASE}/m/${b.pid}#t${Math.floor(b.t)}`;
+    } else if (b.kind === "doc") {
+      const m = mby[b.pid]; if (!m) return null;
+      const d = (m.documents || []).find(x => x && x.doc_id === b.doc);
+      text = d ? (d.title || b.doc) : ""; href = d && d.url ? d.url : `${BASE}/m/${b.pid}`;
+    } else if (b.kind === "digest") {
+      const it = iby[b.slug]; if (!it) return null;
+      text = `what changed — ${it.name || b.slug}`; href = `${BASE}/i/${b.slug}`;
+    }
+    if (!text) return null;
+    const inner = href ? `<a href="${esc(href)}">${esc(text)}</a>` : esc(text);
+    return `<h3 class="pb-head">${inner}</h3>`;
+  }
+  /* one block, its layout painted: lead grows, head becomes its name,
+     half is marked for pairing */
+  function withLayoutHTML(html, b, mby, iby) {
+    if (b.layout === "lead") return `<div class="pb-lead">${html}</div>`;
+    if (b.layout === "head") {
+      const head = renderHead(b, mby, iby);
+      // a story's head IS the story (a name that links to it); anything
+      // with a body of its own — a note, a chart, a reel — keeps its body
+      // under the head, so a layout never discards the editor's words
+      return head ? (b.kind === "story" ? head : head + html) : html;
+    }
+    if (b.layout === "half") return `<div class="pb-half">${html}</div>`;
+    return html;
+  }
+  /* the reader's page: two consecutive halves share a row; everything
+     else stacks as it always did */
+  function paintLayouts(pairs, mby, iby) {
+    const out = [];
+    for (let i = 0; i < pairs.length; i++) {
+      const [b, html] = pairs[i];
+      if (b.layout === "half" && pairs[i + 1] && pairs[i + 1][0].layout === "half") {
+        out.push(`<div class="pb-pair">${withLayoutHTML(html, b, mby, iby)}`
+          + `${withLayoutHTML(pairs[i + 1][1], pairs[i + 1][0], mby, iby)}</div>`);
+        i++;
+      } else out.push(withLayoutHTML(html, b, mby, iby));
+    }
+    return out.join("");
+  }
+  /* the pressed transcript.txt, read as lines: [{t, spk, text}], sorted;
+     one fetch per meeting, cached. Total over garbage — a line that is not
+     "[H:MM:SS] words" is simply not a line. */
+  const SEGL = {};
+  function segLines(pid) {
+    if (!pid) return Promise.resolve([]);
+    if (SEGL[pid]) return Promise.resolve(SEGL[pid]);
+    // null when the tape did not load here (a different fact from a tape
+    // with no lines, which is []) — a dark tape is asked for again next time
+    return fetch(`${BASE}/m/${encodeURIComponent(pid)}/transcript.txt`)
+      .then(r => r.ok ? r.text() : null).catch(() => null)
+      .then(tx => { if (tx == null) return null; const l = parseSegLines(tx); if (l.length) SEGL[pid] = l; return l; });
+  }
+  function parseSegLines(tx) {
+    const out = [];
+    for (const line of String(tx || "").split("\n")) {
+      const m = /^\[(\d+):(\d\d)(?::(\d\d))?\]\s*(.*)$/.exec(line);
+      if (!m) continue;
+      const t = m[3] == null ? +m[1] * 60 + +m[2] : +m[1] * 3600 + +m[2] * 60 + +m[3];
+      const sp = /^([^:]{1,40}):\s+(.*)$/.exec(m[4]);
+      out.push({ t, spk: sp ? sp[1].trim() : "", text: (sp ? sp[2] : m[4]).trim() });
+    }
+    return out.sort((a, b) => a.t - b.t);
+  }
+  /* the line at or before a time — the pressed text is whole seconds */
+  const lineAt = (lines, t) => { let hit = null;
+    for (const l of (lines || [])) { if (l.t <= Math.floor(t) + 0.01) hit = l; else break; }
+    return hit; };
+  /* the lines AT a second: the pressed tape stamps whole seconds, so two
+     short lines can share one — a quote by (pid, t) is every line the record
+     holds at that second, or the line running through it */
+  const linesAt = (lines, t) => {
+    const s = Math.floor(t), same = (lines || []).filter(l => l.t === s && l.text);
+    if (same.length) return same;
+    const l = lineAt(lines, t); return l && l.text ? [l] : [];
+  };
+  /* C2 renders: every one a ref resolved against the record's own planes,
+     in the paper palette; a plane that is not here says so in place */
+  function renderQuote(b, mby, aux) {
+    const m = mby[b.pid];
+    if (!m) return (aux.tried && aux.tried.m.has(b.pid)) ? paperGone(`a line of ${b.pid}`) : paperBudget("a quote");
+    const lines = (aux.lines || {})[b.pid];
+    // three different facts, each said as itself: the tape did not load
+    // here (dark), the tape was past this page's fetch cap, the tape holds
+    // no line at that second
+    if (lines === null) return paperDark(`the tape of ${m.title || b.pid}`, `the line at ${hms(b.t)} reads on the meeting’s own page`);
+    if (!lines) return paperBudget("a quote");
+    const ls = linesAt(lines, b.t);
+    if (!ls.length) return paperGone(`a line at ${hms(b.t)} of ${m.title || b.pid}`);
+    const spk = [...new Set(ls.map(l => l.spk).filter(Boolean))];
+    const body = ls.length === 1 ? `<p>“${esc(ls[0].text)}”</p>`
+      : ls.map(l => `<p>${l.spk ? `<span class="pb-quote-spk">${esc(l.spk)}:</span> ` : ""}“${esc(l.text)}”</p>`).join("");
+    const cite = `${BASE}/m/${esc(b.pid)}#t${Math.floor(b.t)}`;
+    return `<figure class="pb-quote"><blockquote>${body}</blockquote>
+      <figcaption>${ls.length === 1 && spk.length ? `<span class="pb-quote-spk">${esc(spk[0])}</span> · ` : ""}<a href="${cite}" data-cite="${esc(location.origin)}${cite}">${esc(m.title || b.pid)} · ${hms(b.t)}</a></figcaption></figure>`;
+  }
+  function renderDoc(b, mby, tried) {
+    const m = mby[b.pid];
+    if (!m) return tried.m.has(b.pid) ? paperGone(`a document of ${b.pid}`) : paperBudget("a document");
+    const d = (m.documents || []).find(x => x && x.doc_id === b.doc);
+    if (!d) return paperGone(`a document (${b.doc}) of ${m.title || b.pid}`);
+    const inner = `<span class="pb-doc-k">📄 ${esc(d.kind || "document")}</span>`
+      + `<b>${esc(d.title || b.doc)}</b>`
+      + `<span class="pb-doc-m">${esc([m.title || b.pid, d.date, d.pages ? `${d.pages} page${d.pages === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · "))}</span>`;
+    return d.url
+      ? `<a class="pb-doc" href="${esc(d.url)}" target="_blank" rel="noopener"
+           aria-label="${esc(d.kind || "document")} — ${esc(d.title || b.doc)} (opens in a new tab)">${inner}</a>`
+      : `<div class="pb-doc">${inner}</div>`;
+  }
+  function renderDigest(b, iby, tried) {
+    const it = iby[b.slug];
+    if (!it) return tried.i.has(b.slug) ? paperGone(`an issue (${b.slug})`) : paperBudget("a digest");
+    // the timeline parks undated meetings at its tail — "the last n" means
+    // the newest n BY DATE, and the undated are counted, not ranked
+    const tl = (it.timeline || []).filter(n => n && typeof n === "object");
+    const undated = tl.filter(n => !n.date).length;
+    const nodes = tl.filter(n => n.date).sort((a, c) => (c.date > a.date ? 1 : c.date < a.date ? -1 : 0)).slice(0, b.n);
+    if (!nodes.length) return paperGone(`dated appearances of ${it.name || b.slug}`);
+    const rows = nodes.map(n => {
+      const bead = (n.beads || [])[0];
+      const at = `${BASE}/m/${esc(n.pid)}${bead ? `#t${Math.floor(bead.t)}` : ""}`;
+      return `<a class="pb-dg" href="${at}" data-cite="${esc(location.origin)}${at}">
+        <span class="pb-dg-d">${esc(n.date)}</span>
+        <span class="pb-dg-b">${esc(n.body || n.title || n.pid)} · ${n.n || 0} moment${n.n === 1 ? "" : "s"}</span>
+        ${bead ? `<span class="pb-dg-q">${esc((bead.text || "").slice(0, 140))}</span>` : ""}</a>`;
+    }).join("");
+    return `<section class="pb-digest">
+      <div class="sectionhead"><span class="kicker">what changed — <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>, the last ${nodes.length === 1 ? "appearance" : nodes.length + " appearances"}</span></div>
+      <div class="pb-dgs">${rows}</div>
+      <p class="pb-chartsrc">computed from the issue’s own timeline when this paper rendered${undated ? ` — ${undated} undated appearance${undated === 1 ? "" : "s"} not ranked here` : ""} — the full long view reads on the issue’s page</p>
+    </section>`;
   }
   function renderPaperBlock(b, mby, iby, tried, aux) {
     tried = tried || { m: new Set(), i: new Set() };
@@ -3406,6 +3924,9 @@
         ${paras}</section>`;
     }
     if (b.kind === "chart") return renderChartBlock(b, mby, iby, tried, aux);
+    if (b.kind === "quote") return renderQuote(b, mby, { ...aux, tried });
+    if (b.kind === "doc") return renderDoc(b, mby, tried);
+    if (b.kind === "digest") return renderDigest(b, iby, tried);
     if (b.kind === "story" && b.story === "meeting") {
       const m = mby[b.pid];
       if (!m) return tried.m.has(b.pid)
@@ -3441,7 +3962,7 @@
         const lines = (aux.lines || {})[c.pid];
         return { ...c, end, t: mo ? r1(mo.t) : c.start,
                  kind: mo ? mo.kind : "cut",
-                 quote: mo ? mo.quote : (lines ? cut(lineAt(lines, c.start), 120) : ""),
+                 quote: mo ? mo.quote : (lines ? cut((lineAt(lines, c.start) || {}).text || "", 120) : ""),
                  mtitle: m.title || "", video_id: m.video_id || "" };
       }).filter(Boolean);
       if (!clips.length)
@@ -3763,6 +4284,8 @@
   const paperGone = what => `<p class="pb-gone">This paper cites ${esc(what)} `
     + `that isn’t in this pressing of the record — it may have been curated `
     + `away, or pressed under a different id.</p>`;
+  const paperDark = (what, where) => `<p class="pb-gone">${esc(what)} didn’t load here — `
+    + `${esc(where)}. Nothing was judged gone.</p>`;
   const paperBudget = what => `<p class="pb-gone">This paper cites more of the `
     + `record than one page fetches at once — ${esc(what)} here was left `
     + `unfetched, not judged gone. The record itself holds it.</p>`;
@@ -3803,17 +4326,22 @@
       <span class="kicker">the editor’s note</span>
       <textarea class="cz-ednote" data-i="${i}" rows="4" maxlength="${PAPER_NOTE_MAX}"
         placeholder="your own words — why this matters"
-        aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea></div>`;
+        aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea>
+      <div class="cz-ednote-print" aria-hidden="true">${(b.text || "").trim().split(/\n+/).map(t => `<p>${esc(t)}</p>`).join("")}</div></div>`;
   function edRow(html, b, i, n) {
     const act = (a, glyph, label, dis) =>
       `<button type="button" class="cz-edact" data-czed="${a}" data-i="${i}"
         aria-label="${esc(label)}" title="${esc(label)}"${dis ? " disabled" : ""}>${glyph}</button>`;
-    return `<div class="cz-edrow" data-i="${i}">
+    return `<div class="cz-edrow" data-i="${i}" data-layout="${esc(b.layout || "")}">
       <div class="cz-edbar">
         <button type="button" class="cz-edhandle" data-i="${i}"
           aria-label="block ${i + 1} of ${n} — drag to move, or press ↑ ↓"
           title="drag to move — or press ↑ ↓">⠿</button>
         <span class="cz-edkind">${esc(blockLabel(b))}</span>
+        <select class="cz-edlayout" data-i="${i}" aria-label="layout of block ${i + 1}" title="how this block sits on the page">
+          <option value=""${b.layout ? "" : " selected"}>as it comes</option>
+          ${PAPER_LAYOUTS.map(l => `<option value="${l}"${b.layout === l ? " selected" : ""}>${LAYOUT_LABEL[l]}</option>`).join("")}
+        </select>
         <span class="cz-edacts">${act("up", "↑", `move block ${i + 1} up`, !i)}${act("down", "↓", `move block ${i + 1} down`, i >= n - 1)}${act("del", "✕", `remove block ${i + 1}`)}</span>
       </div>
       <div class="cz-edbody">${b.kind === "note" ? edNote(b, i) : html}</div>
@@ -3874,6 +4402,8 @@
     if (ae.classList.contains("cz-edtitle")) return { act: "title", caret: ae.selectionStart };
     if (ae.classList.contains("cz-ednote")) return { act: "note", i: +ae.dataset.i, caret: ae.selectionStart };
     if (ae.classList.contains("cz-edhandle")) return { act: "handle", i: +ae.dataset.i };
+    if (ae.classList.contains("cz-edlayout")) return { act: "layout", i: +ae.dataset.i };
+    if (ae.classList.contains("pb-pv")) return { act: "pbpv", key: ae.dataset.pvkey };
     // an open inline add survives the repaint with its query and its caret:
     // the field itself, or one of its hit buttons (focus returns to the field)
     const slot = ae.closest(".cz-edslot");
@@ -3900,6 +4430,8 @@
     let t = f.act === "title" ? $(".cz-edtitle", el)
       : f.act === "note" ? $(`.cz-ednote[data-i="${f.i}"]`, el)
       : f.act === "handle" ? $(`.cz-edhandle[data-i="${f.i}"]`, el)
+      : f.act === "layout" ? $(`.cz-edlayout[data-i="${f.i}"]`, el)
+      : f.act === "pbpv" ? $$(".pb-pv", el).find(b => b.dataset.pvkey === f.key)
       : f.act === "add" ? $(`.cz-edadd[data-i="${f.i}"]`, el)
       : $(`[data-czed="${f.act}"][data-i="${f.i}"]`, el);
     // NEVER fall to the destructive ✕: a control that vanished or disabled
@@ -3938,6 +4470,10 @@
         else if (kind === "chart") addChartToPaper(ref, "", at);
         else if (kind === "note") addNoteToPaper(at);
         else if (kind === "reel") addReelToPaper(at);
+        else if (kind === "q") { const [pid, t] = ref.split(":"); addQuoteRef(pid, +t, at, b.dataset.text || ""); }
+        else if (kind === "g") addDigestRef(ref, at, 3);
+        else if (kind === "dd") { const [pid, doc] = ref.split("~"); addDocRef(pid, doc, at); }
+        else if (kind === "d") docChooser(b, ref);
       }
     });
     el.addEventListener("keydown", e => {
@@ -3972,7 +4508,23 @@
         edSearch(t.closest(".cz-edslot"));
       }
     });
+    // the layout select (C1): a change writes the enum and repaints both
+    // surfaces; focus returns to the same select on the same block
+    el.addEventListener("change", e => {
+      const t = e.target; if (!t || !t.classList || !t.classList.contains("cz-edlayout")) return;
+      setBlockLayout(+t.dataset.i, t.value);
+    });
     wireEditorDnD(el);
+  }
+  function setBlockLayout(i, layout) {
+    const p = readPaper();
+    if (!(i >= 0 && i < p.blocks.length)) return;
+    if (PAPER_LAYOUTS.includes(layout)) p.blocks[i].layout = layout;
+    else delete p.blocks[i].layout;
+    if (!savePaper(p)) { toast("this browser blocks storage — the change didn’t hold"); return; }
+    retireShortOut();
+    PAGE_FOCUS = { act: "layout", i };
+    refreshPaperSummary(); renderPaperNow();
   }
   /* drag-and-drop: the handle arms its row (a row is draggable only while
      its handle is held, so text in a note can still be selected — Firefox
@@ -4097,6 +4649,51 @@
       || (b[1].sort > a[1].sort ? 1 : b[1].sort < a[1].sort ? -1 : 0));
     return scored.map(x => x[1]);
   }
+  /* the tape's lines by the words a search finds — the reader's own static
+     search index (search/segs.json + a term shard), the same planes
+     staticSearch reads, so no plane is new and no door is added; three
+     characters or more, five hits, the newest meeting first */
+  async function linesSearch(terms, q) {
+    if (!terms.length || String(q || "").trim().length < 3) return [];
+    const [meta, segs] = await Promise.all([
+      getJSON(`${BASE}/search/meta.json`), getJSON(`${BASE}/search/segs.json`)]);
+    if (!Array.isArray(meta) || !Array.isArray(segs)) return [];
+    const sets = await Promise.all(terms.map(async t => {
+      const c = /^[a-z0-9]$/.test(t[0]) ? t[0] : "_";
+      const sh = await getJSON(`${BASE}/search/t-${c}.json`);
+      return new Set(sh && sh[t] ? sh[t] : []);
+    }));
+    let ids = [...(sets[0] || [])];
+    for (let i = 1; i < sets.length; i++) ids = ids.filter(x => sets[i].has(x));
+    const phrase = String(q).trim().toLowerCase();
+    let hits = ids.filter(id => segs[id]);
+    if (terms.length > 1) {
+      const exact = hits.filter(id => String(segs[id][3]).toLowerCase().includes(phrase));
+      if (exact.length) hits = exact;
+    }
+    return hits.map(id => { const [mi, t, , text] = segs[id]; const m = meta[mi] || {};
+      return { pid: m.pid || "", t: +t || 0, text: String(text || ""), title: m.title || m.pid || "", date: m.date || "" }; })
+      .filter(l => PAPER_REF.test(l.pid))
+      .sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0) || a.t - b.t)
+      .slice(0, 5);
+  }
+  /* a meeting's documents on demand — the one button becomes one per filing */
+  async function docChooser(btn, pid) {
+    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`);
+    if (!btn.isConnected) return;
+    const span = document.createElement("span"); span.className = "cz-eddocs";
+    const docs = (m && Array.isArray(m.documents)) ? m.documents : [];
+    // a plane that did not load is a different fact from a meeting that
+    // filed nothing — and either way the keyboard lands on something
+    span.innerHTML = !m
+      ? `<span class="cz-edhit-in" tabindex="-1">this meeting’s plane didn’t load — try again</span>`
+      : docs.length
+      ? docs.slice(0, 6).map(d => `<button type="button" class="btn" data-czed="hit" data-kind="dd"
+          data-ref="${esc(pid)}~${esc(d.doc_id)}" aria-label="add the ${esc(d.kind || "document")} “${esc(d.title || d.doc_id)}”">📄 ${esc(d.kind || "document")}${d.title ? ` — ${esc(cut(d.title, 28))}` : ""}</button>`).join("")
+      : `<span class="cz-edhit-in" tabindex="-1">no documents filed for this meeting</span>`;
+    btn.replaceWith(span);
+    const first = $("button, [tabindex]", span); if (first) first.focus();
+  }
   let ED_INDEX = null;   // the static index, read once per page
   /* total over whatever arrives (decodeReel's law): a plane that did not
      load is remembered as DARK — "the index didn't load" is a different
@@ -4152,9 +4749,14 @@
     }
     const dark = idx.dark.m ? " · the meetings index didn’t load"
                : idx.dark.i ? " · the issues index didn’t load" : "";
-    if (count) count.textContent = (is.length || ms.length)
-      ? `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}${terms.length ? " match" : ""}${dark}`
+    // every keystroke is a generation; only the newest paints. The index
+    // hits paint at once; the tape's lines (C2 — a bigger plane) land after
+    const gen = slot._edgen = (slot._edgen || 0) + 1;
+    const countLine = ls => (is.length || ms.length || ls.length)
+      ? `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}`
+        + (ls.length ? ` · ${n(ls.length, "line", "lines")}` : "") + (terms.length ? " match" : "") + dark
       : `no match${dark}`;
+    if (count) count.textContent = countLine([]);
     const hit = h => {
       const ref = h.kind === "m" ? { story: "meeting", pid: h.ref } : { story: "issue", slug: h.ref };
       const on = storyIndex(p, ref) >= 0;
@@ -4166,12 +4768,29 @@
                aria-label="add “${esc(h.title)}” as a story">＋ story</button>`}
           <button type="button" class="btn" data-czed="hit" data-kind="${h.kind === "m" ? "cm" : "ci"}" data-ref="${esc(h.ref)}"
             aria-label="add a ${h.kind === "m" ? "framing" : "reach"} chart for “${esc(h.title)}”">▤ ${h.kind === "m" ? "framing" : "reach"}</button>
+          ${h.kind === "m"
+            ? `<button type="button" class="btn" data-czed="hit" data-kind="d" data-ref="${esc(h.ref)}" aria-label="a document — choose one of “${esc(h.title)}”’s filings to add">📄 a document</button>`
+            : `<button type="button" class="btn" data-czed="hit" data-kind="g" data-ref="${esc(h.ref)}" aria-label="what changed in “${esc(h.title)}” — a digest">⟳ what changed</button>`}
         </span></div>`; };
-    box.innerHTML = (!ms.length && !is.length)
-      ? `<p class="cz-hint">nothing among the record’s ${n(idx.meetings.length, "meeting", "meetings")}
-           and ${n(idx.issues.length, "issue", "issues")} matches “${esc(q.value.trim())}”${esc(dark)}</p>`
-      : (is.length ? `<span class="cz-edgroup">issues</span>${is.map(hit).join("")}` : "")
-        + (ms.length ? `<span class="cz-edgroup">meetings</span>${ms.map(hit).join("")}` : "");
+    // a line of the tape, by the same words a search finds — quoted whole
+    const lineHit = l => `<div class="cz-edhit">
+        <span class="cz-edhit-t"><b>“${esc(cut(l.text, 110))}”</b><span class="cz-edhit-m">${esc(l.title)} · ${hms(l.t)}${l.date ? ` · ${esc(l.date)}` : ""}</span></span>
+        <span class="cz-edhit-a"><button type="button" class="btn" data-czed="hit" data-kind="q"
+          data-ref="${esc(l.pid)}:${r1(l.t)}" data-text="${esc(cut(l.text, 120))}"
+          aria-label="quote — the line at ${hms(l.t)} of ${esc(l.title)}, in your paper">❝ quote</button></span></div>`;
+    const nothing = ls => `<p class="cz-hint">nothing among the record’s ${n(idx.meetings.length, "meeting", "meetings")},
+           ${n(idx.issues.length, "issue", "issues")}${ls ? " or their lines" : ""} matches “${esc(q.value.trim())}”${esc(dark)}</p>`;
+    box.innerHTML = (is.length ? `<span class="cz-edgroup">issues</span>${is.map(hit).join("")}` : "")
+      + (ms.length ? `<span class="cz-edgroup">meetings</span>${ms.map(hit).join("")}` : "");
+    if (!terms.length) { if (!ms.length && !is.length) box.innerHTML = nothing(false); return; }
+    if (!ms.length && !is.length) box.innerHTML = `<p class="cz-hint cz-edlines-wait">searching the tape’s own lines…</p>`;
+    const ls = await linesSearch(terms, q.value);
+    const box2 = $(".cz-edhits", slot);
+    if (slot._edgen !== gen || !box2) return;   // a newer query painted, or the panel closed
+    const wait = $(".cz-edlines-wait", box2); if (wait) wait.remove();
+    if (count) count.textContent = countLine(ls);
+    if (ls.length) box2.innerHTML += `<span class="cz-edgroup">lines of the tape</span>${ls.map(lineHit).join("")}`;
+    else if (!ms.length && !is.length) box2.innerHTML = nothing(true);
   }
 
   /* ================= SEARCH ================= */
