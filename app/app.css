@@ -418,6 +418,52 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);padding:6px}
 .rt-b:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
 .rt-b:disabled{opacity:.4;cursor:default}
+
+/* cut from anywhere (specs/22 P0) — the moment cards' quiet tick, grown by
+   every timed unit the record shows. Reading-surface register: surface +
+   slate, accent when pressed; not one studio hue (§6.1 — these sit on the
+   paper). The transcript's tick hides until its row is hovered or focused
+   (thousands of rows — quiet is load-bearing), but a pressed tick stays. */
+.seg{position:relative}
+/* the rows make room for their ticks only once the ticks exist (the class
+   is the hydrator's) — JS-off, the row is exactly as pressed */
+#transcript.cz-cuttable .seg{padding-right:52px}
+.seg-tick{position:absolute;top:2px;right:0;z-index:2;
+  font:var(--weight-medium) 11px/1 var(--font-mono);cursor:pointer;
+  background:var(--surface-card);color:var(--text-secondary);
+  border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);
+  min-width:24px;min-height:24px;padding:4px 7px;
+  opacity:0;transition:opacity .12s;user-select:none}
+/* the glyph lives in the stylesheet, so a citation dragged across rows
+   never carries a column of ＋ and ✓ */
+.seg-tick::before,.stick::before,.btick::before{content:attr(data-g)}
+.seg:hover .seg-tick,.seg:focus-within .seg-tick,
+.seg-tick.on,.seg-tick:focus-visible{opacity:1}
+/* a screen that cannot hover cannot reveal — the ticks simply show, so a
+   thumb never lands on a control it could not see */
+@media (hover:none){.seg-tick{opacity:1}}
+.seg-tick:hover{border-color:var(--accent);color:var(--accent)}
+.seg-tick.on{background:var(--accent);color:var(--text-inverse);border-color:var(--accent)}
+@media (prefers-reduced-motion: reduce){.seg-tick{transition:none}}
+/* a search hit's tick rides beside its row — the row is an anchor, so the
+   button is a positioned sibling in a wrapper, never a nested control */
+.swrap{position:relative}
+.swrap .sresult{display:block;padding-right:76px}   /* room for the tick */
+.stick{position:absolute;top:var(--space-2);right:var(--space-2);z-index:2;
+  font:var(--weight-medium) 10px/1 var(--font-mono);cursor:pointer;user-select:none;
+  background:var(--surface-card);color:var(--text-secondary);
+  border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);
+  min-height:24px;padding:6px 8px}
+.stick:hover{border-color:var(--accent);color:var(--accent)}
+.stick.on{background:var(--accent);color:var(--text-inverse);border-color:var(--accent)}
+/* an issue bead's tick — a small chip glued after its bead */
+.btick{font:var(--weight-medium) 11px/1 var(--font-mono);cursor:pointer;
+  background:var(--surface-card);color:var(--text-secondary);
+  border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);
+  min-width:24px;min-height:24px;padding:4px 7px;margin:-2px 0 2px;
+  align-self:flex-start;user-select:none}   /* a chip under its bead, not a bar */
+.btick:hover{border-color:var(--accent);color:var(--accent)}
+.btick.on{background:var(--accent);color:var(--text-inverse);border-color:var(--accent)}
 .rt-x:hover{border-color:var(--accent)}
 .rt-out{display:flex;flex-direction:column;gap:var(--space-2);
   border-top:var(--border-w) solid var(--border-hairline);padding-top:var(--space-3)}
@@ -455,6 +501,16 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
 .rc-meta .ts{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--accent)}
 .rc-where{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);
   margin-bottom:var(--space-3)}
+/* make this yours (specs/22 §5.4): the explicit choice, painted in place —
+   a quiet line under the outputs, the paper palette, three real buttons */
+.rv-take{font-size:var(--text-sm);color:var(--text-primary);margin:var(--space-3) 0 0;
+  padding:var(--space-2) var(--space-3);background:var(--tint-1);
+  border-left:var(--border-w-strong) solid var(--accent);border-radius:var(--radius-sm);
+  display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center}
+.rv-take[hidden]{display:none}
+.rv-take .btn{font-size:var(--text-xs)}
+.rv-take-t{flex:0 0 100%}
+.rv-take:focus-visible{outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
 
 /* /app/p — a rendered paper (specs/21 P1). The quiet palette on purpose:
    whatever mode the editor liked, a paper READS as the record reads — ink on
@@ -1050,6 +1106,29 @@ html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
 .cz-reeln b{color:var(--accent)}          /* deep green — high contrast, "in the reel" */
 .cz-reelacts{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-2)}
 .cz-reelacts .btn{font-size:var(--text-xs)}
+/* the panel tray (specs/22 P0): the meeting tray's controls, in the drawer,
+   on every page — the paper rows' register, bounded by the studio's tokens */
+.cz-rclips{display:flex;flex-direction:column;gap:var(--space-2);
+  margin:0 0 var(--space-3);max-height:44vh;overflow-y:auto;
+  overscroll-behavior:contain;padding-right:2px}
+.cz-rclip{display:flex;gap:var(--space-2);align-items:flex-start;
+  background:var(--surface-card);border:var(--border-w) solid var(--border-hairline);
+  border-left:var(--border-w-strong) solid var(--studio-accent-2, var(--border-strong));
+  border-radius:var(--radius-sm);padding:6px 8px}
+.cz-rord{font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
+  color:var(--text-secondary);padding-top:4px;min-width:14px;text-align:right}
+.cz-rmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.cz-rquote{font-size:var(--text-xs);font-weight:var(--weight-medium);
+  color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cz-rmeta{font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)}
+.cz-rtrim{display:flex;align-items:center;gap:3px;flex-wrap:wrap}
+.cz-rtl{font-family:var(--font-mono);font-size:9px;text-transform:uppercase;
+  letter-spacing:var(--tracking-label);color:var(--text-secondary)}
+.cz-racts{display:inline-flex;flex-direction:column;gap:2px;flex:0 0 auto;
+  align-items:center}
+.cz-rprev{display:inline-flex;align-items:center;justify-content:center;
+  text-decoration:none}
+.cz-rprev:hover{color:var(--studio-accent-text, var(--accent))}
 .cz-cov{font:var(--weight-medium) var(--text-xs)/1.4 var(--font-mono);
   color:var(--text-secondary);margin:var(--space-5) 0 0;
   border-top:var(--border-w) solid var(--border-hairline);padding-top:var(--space-3)}
