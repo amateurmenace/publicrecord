@@ -855,18 +855,20 @@
   /* a trim of the clip the stage is previewing reaches the stage: its end
      is the gate's end, its start the status line's */
   function pvRetrim(clips) {
-    if (!PV.clip) return;
-    const key = clipKey(PV.clip);
-    const c = clips.find(x => clipKey(x) === key);
-    if (c && (c.start !== PV.clip.start || c.end !== PV.clip.end)) {
-      // the gate follows the new edges. A clip that has PLAYED stays played
-      // (its frame rests paused at the old end — ▶ hears the new cut), a
-      // paused one stays paused: nothing here plays, seeks, or repaints a
-      // state the frame is not in
-      PV.clip = { ...PV.clip, start: c.start, end: c.end };
-      if (PV.pending && clipKey(PV.pending) === key) PV.pending = PV.clip;
-      pvShow();
-    }
+    // the gate follows the new edges — of the clip previewing, of one still
+    // loading, and of the clip a stop left behind (the frame's own ▶ resumes
+    // that one; a stop before ready cues it). A clip that has PLAYED stays
+    // played (its frame rests paused at the old end — ▶ hears the new cut), a
+    // paused one stays paused: nothing here plays, seeks, or repaints a state
+    // the frame is not in
+    const edge = x => { if (!x) return x;
+      const c = clips.find(y => clipKey(y) === clipKey(x));
+      return c && (c.start !== x.start || c.end !== x.end) ? { ...x, start: c.start, end: c.end } : x; };
+    const was = PV.clip, wasLast = PV.last;
+    PV.clip = edge(PV.clip); PV.last = edge(PV.last); PV.pending = edge(PV.pending);
+    // the status line and the open-the-tape link follow the clip a stop
+    // left behind too (a review catch)
+    if (PV.clip !== was || PV.last !== wasLast) pvShow();
   }
   function pvPlay(clip) {
     if (!clip) return;
@@ -910,6 +912,7 @@
       PV.vid = clip.video_id; PV.settling = true;
       setTimeout(() => { PV.settling = false; }, 500);
       pvSend("loadVideoById", [{ videoId: clip.video_id, startSeconds: clip.start }]);
+      PV.state = -1;   // a load in flight is not a seen silence (a review catch)
     } else {
       pvSend("seekTo", [clip.start, true]); pvSend("playVideo");
     }
@@ -928,7 +931,7 @@
         PV.stopped = false; PV.pending = null;
         const at = PV.last || {};
         PV.vid = at.video_id || PV.vid;
-        pvSend("cueVideoById", [{ videoId: PV.vid, startSeconds: Math.floor(+at.start || 0) }]);
+        pvSend("cueVideoById", [{ videoId: PV.vid, startSeconds: Math.max(0, +at.start || 0) }]);
       } else if (PV.pending) {
         const c = PV.pending; PV.pending = null;
         if (c.video_id === PV.vid) { pvSend("seekTo", [c.start, true]); pvSend("playVideo"); }
@@ -1530,6 +1533,7 @@
         if (typeof setTimeout === "function")
           setTimeout(() => { if (REELPLAY) REELPLAY.settling = false; }, 500);
         ytSend("cmd", "loadVideoById", [{ videoId: pv.vid, startSeconds: pv.start }]);
+        YT.state = -1; YT.time = pv.start;   // the load's own first report is the new tape's
       } else if (YT.pending != null) { const p = YT.pending; YT.pending = null; ytSeek(p); }
     }
     if (d.info && typeof d.info.playerState === "number" && d.info.playerState !== YT.state) {
@@ -1545,7 +1549,17 @@
           YT.hold = false;
           if (PV.clip || PV.free) pvPause();
           if (REELPLAY && REELPLAY.paused) {
-            REELPLAY.paused = false; REELPLAY.active = true; REELPLAY.armed = false; reelShow();
+            REELPLAY.paused = false; REELPLAY.active = true; REELPLAY.armed = false;
+            // on from its clip: where the frame stands inside it; from its
+            // start when the frame stands before it; on to the next clip when
+            // the frame already stands at its end (the gate never saw it)
+            // — never on a time from the tape a load is swapping out: while
+            // the switch settles the reel simply resumes, and the gate
+            // re-arms after the beat (reelAdvance's own rule; a review catch)
+            const c = (REELPLAY.clips || [])[REELPLAY.i];
+            const t = typeof d.info.currentTime === "number" ? d.info.currentTime : YT.time;
+            if (c && !REELPLAY.settling && t >= c.end - 0.12) reelNext();
+            else { if (c && !REELPLAY.settling && t < c.start - 0.75) reelSeek(c); reelShow(); }
           }
         }
       }
@@ -2547,6 +2561,14 @@
   function reelSeek(c) {
     const vid = c.video_id;
     if (!vid) return;                          // a tape-less clip is read, not played
+    // the tape a stashed switch will load (another meeting's cite, pressed in
+    // the load gap): a later press on that same meeting moves the switch's
+    // start — it is not a seek of the tape the switch abandons
+    if (REELPLAY.pending && REELPLAY.pending.vid === vid) {
+      REELPLAY.pending.start = c.start;
+      if (typeof YT !== "undefined") YT.hold = false;   // the reader asked the page for a tape
+      return;
+    }
     if (vid === REELPLAY.vid) { ytSeek(c.start); return; }
     // a cross-meeting clip: load its tape. The swapped-out video keeps posting
     // stale times for a beat — they belong to another timeline and could arm or
@@ -2559,6 +2581,10 @@
       if (typeof setTimeout === "function")
         setTimeout(() => { if (REELPLAY) REELPLAY.settling = false; }, 500);
       ytSend("cmd", "loadVideoById", [{ videoId: vid, startSeconds: c.start }]);
+      // a load in flight is not a seen silence, and its first report is the
+      // new tape's: forget the old tape's resting state and time, or a pause
+      // sent in the gap trusts a state the frame is leaving (a review catch)
+      YT.state = -1; YT.time = c.start;
     } else {
       REELPLAY.pending = { vid, start: c.start };   // player not up yet → apply on onReady
     }
@@ -2579,16 +2605,18 @@
       if (t >= c.start - 0.75 && t < c.end - 0.12) REELPLAY.armed = true;
       return;
     }
-    if (t >= c.end - 0.12) {
-      REELPLAY.armed = false;
-      // the next clip that actually has a tape (a cite-only clip is read, not played)
-      let n = REELPLAY.i + 1;
-      while (n < REELPLAY.clips.length && !REELPLAY.clips[n].video_id) n++;
-      if (n < REELPLAY.clips.length) {
-        REELPLAY.i = n; reelSeek(REELPLAY.clips[n]); reelShow();
-      } else {
-        REELPLAY.active = false; ytSend("cmd", "pauseVideo", []); reelShow(true);
-      }
+    if (t >= c.end - 0.12) reelNext();
+  }
+  /* on to the next clip that actually has a tape (a cite-only clip is read,
+     not played) — or the reel is complete */
+  function reelNext() {
+    REELPLAY.armed = false;
+    let n = REELPLAY.i + 1;
+    while (n < REELPLAY.clips.length && !REELPLAY.clips[n].video_id) n++;
+    if (n < REELPLAY.clips.length) {
+      REELPLAY.i = n; reelSeek(REELPLAY.clips[n]); reelShow();
+    } else {
+      REELPLAY.active = false; ytSend("cmd", "pauseVideo", []); reelShow(true);
     }
   }
   function reelShow(done) {
@@ -2664,6 +2692,10 @@
      the empty↔live boundary repaints the row that depends on it (the fix
      re-review's catch: a gate whose truth can change under a keystroke
      needs a repaint on exactly that boundary). */
+  // an untitled paper reads as "Untitled paper" — on the reader's page, in
+  // the editor's print twin, everywhere the title is painted (a re-review
+  // catch: the twin trimmed and the page did not)
+  const printTitle = t => String(t || "").trim() || "Untitled paper";
   const paperHasLive = d => !!(d.title
     || d.blocks.some(b => b.kind !== "note" || b.text.trim()));
   const PAPER_KEY = "cz-paper";        // the one draft this browser kept (P1–P3) — read once, migrated, retired
@@ -3701,7 +3733,10 @@
     ]);
     if (gen !== PAPER_GEN) return;     // a newer render superseded this one
     const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
-    const lines = {}; for (const [pid, l] of lineSets) if (l === null || l.length) lines[pid] = l;
+    // every fetched result is kept — null (the tape didn't load), [] (a tape
+    // with no lines) and lines are three facts; only a pid never fetched
+    // (past the cap) stays undefined
+    const lines = {}; for (const [pid, l] of lineSets) lines[pid] = l;
     const aux = { votes: votesPlane, analytics, lines };
     // the on-page editor (specs/23 A3): the DRAFT, in the studio, renders
     // as itself with the arranging chrome on it — a handle, ↑ ↓, ✕ per
@@ -3724,8 +3759,9 @@
         renderPaperNow(); return; }
       doc = fresh;
       const n = doc.blocks.length;
+      const paired = halfPairs(doc.blocks);
       const rows = doc.blocks.map((b, i) => edSlot(i)
-        + edRow(withLayoutHTML(renderPaperBlock(b, mby, iby, tried, aux) || paperGone("a block"), b, mby, iby), b, i, n))
+        + edRow(withLayoutHTML(renderPaperBlock(b, mby, iby, tried, aux) || paperGone("a block"), b, mby, iby), b, i, n, paired.has(i)))
         .join("") + edSlot(n);
       const keep = captureEdFocus(el) || captureEdPanel(el);
       el.innerHTML = edHead(doc) + rows;
@@ -3734,7 +3770,7 @@
       return;
     }
     const head = `<header class="phead">
-        <h2 class="ptitle">${esc(doc.title || "Untitled paper")}</h2>
+        <h2 class="ptitle">${esc(printTitle(doc.title))}</h2>
         <p class="pfrom">${from === "draft"
           ? "your draft — it lives in this browser. ✎ open the studio to edit it here; share it from the panel as a link or a file"
           : from === "stored"
@@ -3803,6 +3839,12 @@
   }
   /* the reader's page: two consecutive halves share a row; everything
      else stacks as it always did */
+  /* which blocks the reader's page pairs: two consecutive halves, taken two
+     at a time — paintLayouts' own rule; the editor marks exactly these */
+  const halfPairs = blocks => { const s = new Set();
+    for (let i = 0; i < blocks.length - 1; i++)
+      if (blocks[i].layout === "half" && blocks[i + 1].layout === "half") { s.add(i); s.add(i + 1); i++; }
+    return s; };
   function paintLayouts(pairs, mby, iby) {
     const out = [];
     for (let i = 0; i < pairs.length; i++) {
@@ -3869,7 +3911,7 @@
       : ls.map(l => `<p>${l.spk ? `<span class="pb-quote-spk">${esc(l.spk)}:</span> ` : ""}“${esc(l.text)}”</p>`).join("");
     const cite = `${BASE}/m/${esc(b.pid)}#t${Math.floor(b.t)}`;
     return `<figure class="pb-quote"><blockquote>${body}</blockquote>
-      <figcaption>${ls.length === 1 && spk.length ? `<span class="pb-quote-spk">${esc(spk[0])}</span> · ` : ""}<a href="${cite}" data-cite="${esc(location.origin)}${cite}">${esc(m.title || b.pid)} · ${hms(b.t)}</a></figcaption></figure>`;
+      <figcaption>${ls.length === 1 && spk.length ? `<span class="pb-quote-spk">${esc(spk[0])}</span> · ` : ""}<a href="${cite}">${esc(m.title || b.pid)} · ${hms(b.t)}</a></figcaption></figure>`;
   }
   function renderDoc(b, mby, tried) {
     const m = mby[b.pid];
@@ -3890,21 +3932,24 @@
     // the timeline parks undated meetings at its tail — "the last n" means
     // the newest n BY DATE, and the undated are counted, not ranked
     const tl = (it.timeline || []).filter(n => n && typeof n === "object");
-    const undated = tl.filter(n => !n.date).length;
-    const nodes = tl.filter(n => n.date).sort((a, c) => (c.date > a.date ? 1 : c.date < a.date ? -1 : 0)).slice(0, b.n);
-    if (!nodes.length) return paperGone(`dated appearances of ${it.name || b.slug}`);
+    if (!tl.length) return paperGone(`appearances of ${it.name || b.slug}`);
+    const dated = tl.filter(n => n.date).sort((a, c) => (c.date > a.date ? 1 : c.date < a.date ? -1 : 0));
+    const undated = tl.length - dated.length;
+    // none dated at all: the timeline's own last n, each said as undated —
+    // present in the pressing, never "curated away"
+    const nodes = dated.length ? dated.slice(0, b.n) : tl.slice(-b.n).reverse();
     const rows = nodes.map(n => {
       const bead = (n.beads || [])[0];
       const at = `${BASE}/m/${esc(n.pid)}${bead ? `#t${Math.floor(bead.t)}` : ""}`;
-      return `<a class="pb-dg" href="${at}" data-cite="${esc(location.origin)}${at}">
-        <span class="pb-dg-d">${esc(n.date)}</span>
+      return `<a class="pb-dg" href="${at}">
+        <span class="pb-dg-d">${esc(n.date || "undated")}</span>
         <span class="pb-dg-b">${esc(n.body || n.title || n.pid)} · ${n.n || 0} moment${n.n === 1 ? "" : "s"}</span>
         ${bead ? `<span class="pb-dg-q">${esc((bead.text || "").slice(0, 140))}</span>` : ""}</a>`;
     }).join("");
     return `<section class="pb-digest">
-      <div class="sectionhead"><span class="kicker">what changed — <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>, the last ${nodes.length === 1 ? "appearance" : nodes.length + " appearances"}</span></div>
+      <div class="sectionhead"><span class="kicker">what changed — <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>, ${dated.length ? `the last ${nodes.length === 1 ? "appearance" : nodes.length + " appearances"}` : `${nodes.length === 1 ? "an undated appearance" : nodes.length + " undated appearances"}`}</span></div>
       <div class="pb-dgs">${rows}</div>
-      <p class="pb-chartsrc">computed from the issue’s own timeline when this paper rendered${undated ? ` — ${undated} undated appearance${undated === 1 ? "" : "s"} not ranked here` : ""} — the full long view reads on the issue’s page</p>
+      <p class="pb-chartsrc">computed from the issue’s own timeline when this paper rendered${dated.length ? (undated ? ` — ${undated} undated appearance${undated === 1 ? "" : "s"} not ranked here` : "") : " — none of its appearances is dated, so its last ones stand here, latest-added first"} — the full long view reads on the issue’s page</p>
     </section>`;
   }
   function renderPaperBlock(b, mby, iby, tried, aux) {
@@ -4312,6 +4357,7 @@
       <input class="cz-edtitle" type="text" maxlength="${PAPER_TITLE_MAX}"
         value="${esc(doc.title)}" placeholder="name your paper"
         aria-label="your paper’s title">
+      <p class="ptitle cz-edtitle-print" aria-hidden="true">${esc(printTitle(doc.title))}</p>
       <p class="pfrom">your draft, open for editing — drag a block by its
         handle or use its ↑ ↓; ✕ removes it; ＋ adds one at that spot. It lives
         in this browser; share it from the studio panel.</p>
@@ -4322,17 +4368,21 @@
         aria-expanded="false"
         aria-label="add here${at ? ` — after block ${at}` : " — at the top"}">＋ add here</button>
     </div>`;
+  /* the print twins: an <input> prints one clipped line and a <textarea>
+     its four rows, not their words — the paper prints these instead, kept
+     in step with every keystroke and re-read on beforeprint */
+  const notePrint = text => String(text || "").trim().split(/\n+/).map(t => `<p>${esc(t)}</p>`).join("");
   const edNote = (b, i) => `<div class="pb-note cz-ednotewrap">
       <span class="kicker">the editor’s note</span>
       <textarea class="cz-ednote" data-i="${i}" rows="4" maxlength="${PAPER_NOTE_MAX}"
         placeholder="your own words — why this matters"
         aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea>
-      <div class="cz-ednote-print" aria-hidden="true">${(b.text || "").trim().split(/\n+/).map(t => `<p>${esc(t)}</p>`).join("")}</div></div>`;
-  function edRow(html, b, i, n) {
+      <div class="cz-ednote-print" aria-hidden="true">${notePrint(b.text)}</div></div>`;
+  function edRow(html, b, i, n, pair) {
     const act = (a, glyph, label, dis) =>
       `<button type="button" class="cz-edact" data-czed="${a}" data-i="${i}"
         aria-label="${esc(label)}" title="${esc(label)}"${dis ? " disabled" : ""}>${glyph}</button>`;
-    return `<div class="cz-edrow" data-i="${i}" data-layout="${esc(b.layout || "")}">
+    return `<div class="cz-edrow" data-i="${i}" data-layout="${esc(b.layout || "")}"${pair ? ' data-pair="1"' : ""}>
       <div class="cz-edbar">
         <button type="button" class="cz-edhandle" data-i="${i}"
           aria-label="block ${i + 1} of ${n} — drag to move, or press ↑ ↓"
@@ -4448,6 +4498,15 @@
      repaint never needs rewiring */
   function wireEditor(el) {
     if (el._czed) return; el._czed = true;
+    // as the page goes to paper, the print twins re-read the live fields
+    window.addEventListener("beforeprint", () => {
+      if (!el.isConnected) return;
+      $$(".cz-ednote", el).forEach(ta => {
+        const tw = ta.parentElement && $(".cz-ednote-print", ta.parentElement);
+        if (tw) tw.innerHTML = notePrint(noteText(ta.value)); });
+      const ti = $(".cz-edtitle", el), tw = $(".cz-edtitle-print", el);
+      if (ti && tw) tw.textContent = printTitle(cut(ti.value, PAPER_TITLE_MAX));
+    });
     el.addEventListener("click", e => {
       const b = e.target.closest && e.target.closest("[data-czed]");
       if (!b || !el.contains(b)) return;
@@ -4495,6 +4554,7 @@
       if (t.classList.contains("cz-edtitle")) {
         const d = readPaper();
         d.title = cut(t.value, PAPER_TITLE_MAX);
+        const tw = $(".cz-edtitle-print", el); if (tw) tw.textContent = printTitle(d.title);
         if (!savePaper(d)) return;
         retireShortOut(); refreshPaperSummary();
         document.title = `${d.title || "A paper"} — publicrecord.studio`;
@@ -4502,6 +4562,8 @@
         const d = readPaper(), i = +t.dataset.i;
         if (!(d.blocks[i] && d.blocks[i].kind === "note")) return;
         d.blocks[i].text = noteText(t.value);
+        const tw = t.parentElement && $(".cz-ednote-print", t.parentElement);
+        if (tw) tw.innerHTML = notePrint(d.blocks[i].text);
         if (!savePaper(d)) return;
         retireShortOut(); refreshPaperSummary();
       } else if (t.classList.contains("cz-edq")) {
@@ -4661,7 +4723,9 @@
     const sets = await Promise.all(terms.map(async t => {
       const c = /^[a-z0-9]$/.test(t[0]) ? t[0] : "_";
       const sh = await getJSON(`${BASE}/search/t-${c}.json`);
-      return new Set(sh && sh[t] ? sh[t] : []);
+      // own, listed postings only — a query holding "constructor" would
+      // otherwise read Object.prototype's and throw (a review catch)
+      return new Set(Array.isArray(sh && sh[t]) && Object.prototype.hasOwnProperty.call(sh, t) ? sh[t] : []);
     }));
     let ids = [...(sets[0] || [])];
     for (let i = 1; i < sets.length; i++) ids = ids.filter(x => sets[i].has(x));
@@ -4679,19 +4743,29 @@
   }
   /* a meeting's documents on demand — the one button becomes one per filing */
   async function docChooser(btn, pid) {
-    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`);
+    const url = `${BASE}/meetings/${encodeURIComponent(pid)}.json`;
+    // a null the paper's own render cached is not this press's answer: ask
+    // once more before saying "didn't load" — and only then, so a fresh
+    // failure costs one fetch, not two (a review catch)
+    const cached = url in _cache;
+    let m = await getJSON(url);
+    if (!m && cached) { delete _cache[url]; m = await getJSON(url); }
     if (!btn.isConnected) return;
+    // a failed load is not kept: the retry below fetches again
+    if (!m) delete _cache[url];
     const span = document.createElement("span"); span.className = "cz-eddocs";
     const docs = (m && Array.isArray(m.documents)) ? m.documents : [];
     // a plane that did not load is a different fact from a meeting that
     // filed nothing — and either way the keyboard lands on something
     span.innerHTML = !m
-      ? `<span class="cz-edhit-in" tabindex="-1">this meeting’s plane didn’t load — try again</span>`
+      ? `<span class="cz-edhit-in">this meeting’s plane didn’t load</span> <button type="button" class="btn"
+          data-czed="hit" data-kind="d" data-ref="${esc(pid)}" aria-label="try again — load this meeting’s documents">try again</button>`
       : docs.length
       ? docs.slice(0, 6).map(d => `<button type="button" class="btn" data-czed="hit" data-kind="dd"
           data-ref="${esc(pid)}~${esc(d.doc_id)}" aria-label="add the ${esc(d.kind || "document")} “${esc(d.title || d.doc_id)}”">📄 ${esc(d.kind || "document")}${d.title ? ` — ${esc(cut(d.title, 28))}` : ""}</button>`).join("")
       : `<span class="cz-edhit-in" tabindex="-1">no documents filed for this meeting</span>`;
-    btn.replaceWith(span);
+    // a retry replaces the whole chooser it stood in, message and all
+    (btn.closest(".cz-eddocs") || btn).replaceWith(span);
     const first = $("button, [tabindex]", span); if (first) first.focus();
   }
   let ED_INDEX = null;   // the static index, read once per page
@@ -4756,7 +4830,13 @@
       ? `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}`
         + (ls.length ? ` · ${n(ls.length, "line", "lines")}` : "") + (terms.length ? " match" : "") + dark
       : `no match${dark}`;
-    if (count) count.textContent = countLine([]);
+    // no verdict while the tape's lines are still being read — a "no match"
+    // announced now would be taken back when they land. The lines are read
+    // only for three characters or more (linesSearch's own gate): "searching"
+    // and "or their lines" are said only then (a review catch)
+    const linesOK = terms.length > 0 && q.value.trim().length >= 3;
+    if (count) count.textContent = (linesOK && !is.length && !ms.length)
+      ? "searching the tape’s own lines…" : countLine([]);
     const hit = h => {
       const ref = h.kind === "m" ? { story: "meeting", pid: h.ref } : { story: "issue", slug: h.ref };
       const on = storyIndex(p, ref) >= 0;
@@ -4782,15 +4862,21 @@
            ${n(idx.issues.length, "issue", "issues")}${ls ? " or their lines" : ""} matches “${esc(q.value.trim())}”${esc(dark)}</p>`;
     box.innerHTML = (is.length ? `<span class="cz-edgroup">issues</span>${is.map(hit).join("")}` : "")
       + (ms.length ? `<span class="cz-edgroup">meetings</span>${ms.map(hit).join("")}` : "");
-    if (!terms.length) { if (!ms.length && !is.length) box.innerHTML = nothing(false); return; }
+    if (!linesOK) { if (!ms.length && !is.length) box.innerHTML = nothing(false); return; }
     if (!ms.length && !is.length) box.innerHTML = `<p class="cz-hint cz-edlines-wait">searching the tape’s own lines…</p>`;
-    const ls = await linesSearch(terms, q.value);
+    // a lines search that breaks must not strand the status line on
+    // "searching…" — nor be painted as "no match": the lines were not read
+    let ls = [], broke = false;
+    try { ls = await linesSearch(terms, q.value); } catch { broke = true; }
     const box2 = $(".cz-edhits", slot);
     if (slot._edgen !== gen || !box2) return;   // a newer query painted, or the panel closed
     const wait = $(".cz-edlines-wait", box2); if (wait) wait.remove();
-    if (count) count.textContent = countLine(ls);
-    if (ls.length) box2.innerHTML += `<span class="cz-edgroup">lines of the tape</span>${ls.map(lineHit).join("")}`;
-    else if (!ms.length && !is.length) box2.innerHTML = nothing(true);
+    if (count) count.textContent = broke ? `${countLine([])} — the tape’s lines couldn’t be read` : countLine(ls);
+    // appended in place — never a rebuild of the hits already painted, so a
+    // reader who has tabbed onto one keeps their place when the lines land
+    if (ls.length) box2.insertAdjacentHTML("beforeend", `<span class="cz-edgroup">lines of the tape</span>${ls.map(lineHit).join("")}`);
+    else if (!ms.length && !is.length) box2.innerHTML = broke
+      ? `<p class="cz-hint">the tape’s lines couldn’t be read here — the index didn’t answer</p>` : nothing(true);
   }
 
   /* ================= SEARCH ================= */
@@ -4959,7 +5045,9 @@
     const sets = await Promise.all(terms.map(async t => {
       const c = /^[a-z0-9]$/.test(t[0]) ? t[0] : "_";
       const sh = await getJSON(`${BASE}/search/t-${c}.json`);
-      return new Set(sh && sh[t] ? sh[t] : []);
+      // own, listed postings only — a query holding "constructor" would
+      // otherwise read Object.prototype's and throw (a review catch)
+      return new Set(Array.isArray(sh && sh[t]) && Object.prototype.hasOwnProperty.call(sh, t) ? sh[t] : []);
     }));
     let ids = [...(sets[0] || [])];
     for (let i = 1; i < sets.length; i++) ids = ids.filter(x => sets[i].has(x));

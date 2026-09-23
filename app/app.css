@@ -1062,13 +1062,13 @@ table.twin a{color:var(--accent)}
      the screen never shows, two half rows share a row */
   .cz-editing .cz-edbar,.cz-editing .cz-edslot{display:none !important}
   html.cz-m-studio .cz-editing .cz-edrow{border:0;padding:0}
-  html.cz-m-studio .cz-editing .cz-edtitle,html.cz-m-studio .cz-editing .cz-edtitle:focus-visible{
-    border:0;padding:0;font-size:34px;outline:0;box-shadow:none;caret-color:transparent}
+  html.cz-m-studio .cz-editing .cz-edtitle{display:none}
+  html.cz-m-studio .cz-editing .cz-edtitle-print{display:block;margin:0}
   html.cz-m-studio .cz-editing .cz-edhead{border-bottom-color:#000}
   html.cz-m-studio .cz-editing .cz-ednote{display:none}
   html.cz-m-studio .cz-editing .cz-ednote-print{display:block}
-  html.cz-m-studio .cz-editing .cz-edrow[data-layout="half"]{display:inline-block;width:48%;vertical-align:top}
-  html.cz-m-studio .cz-editing .cz-edrow[data-layout="half"] .cz-edbody{width:auto}
+  html.cz-m-studio .cz-editing .cz-edrow[data-pair]{display:inline-block;width:48%;margin:0 1%;vertical-align:top}
+  html.cz-m-studio .cz-editing .cz-edrow[data-pair] .cz-edbody{width:auto}
   a{color:#000}
 }
 
@@ -1405,8 +1405,10 @@ html.cz-m-studio .cz-ednote{width:100%;box-sizing:border-box;resize:vertical;min
   background:var(--surface-card);border:var(--border-w) dashed var(--border-strong);
   border-radius:var(--radius-sm);padding:7px 9px}
 html.cz-m-studio .cz-ednote::placeholder{color:var(--text-secondary)}
-.cz-ednote-print{display:none}
-html.cz-m-studio .cz-edrow[data-layout="half"] .cz-edbody{width:50%;min-width:0}
+.cz-ednote-print,.cz-edtitle-print{display:none}
+/* a half paints at half width only where the reader's page pairs it, and
+   only where the reader's page sits halves side by side (over 720px) */
+@media (min-width:721px){html.cz-m-studio .cz-edrow[data-pair] .cz-edbody{width:50%;min-width:0}}
 /* the insertion point: a dashed rule with a ＋ in it; a drop thickens it */
 html.cz-m-studio .cz-edslot{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);
   margin:var(--space-2) 0;min-height:24px}
