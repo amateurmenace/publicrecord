@@ -379,8 +379,15 @@
     let want = "over-time";
     try { const s = localStorage.getItem(STORY_KEY); if (s === "latest") want = s; } catch { /* private mode */ }
     if (location.hash === "#latest") want = "latest"; else if (location.hash === "#over-time") want = "over-time";
+    // the toggle hides by its own class, on the story's make-wrapper when
+    // the studio has wrapped it — never by `hidden`, which the town scope
+    // paints on every card with a data-town and would show the latest
+    // meeting's story again the moment the scope repainted (a live catch
+    // at v2.1.16: both stories stood, stacked)
+    const box = el => (el.parentElement && el.parentElement.classList.contains("cz-mkwrap"))
+      ? el.parentElement : el;
     const show = (which, focus) => {
-      for (const k of Object.keys(stories)) stories[k].hidden = k !== which;
+      for (const k of Object.keys(stories)) box(stories[k]).classList.toggle("fp-off", k !== which);
       tabs.forEach(t => t.setAttribute("aria-current", t.dataset.story === which ? "true" : "false"));
       try { localStorage.setItem(STORY_KEY, which); } catch { /* private mode */ }
       if (focus) { const h = $("h2", stories[which]); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); } }

@@ -360,8 +360,9 @@ a.fp-mcell:hover i{opacity:1}
 .fp-sn{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);text-align:right}
 a.fp-topic:hover,a.lenslabel:hover{color:var(--accent)}
 .fp-topics .lensrow{grid-template-columns:200px 1fr 34px 90px}
-/* the story toggle hides the other story only with the script on */
-html.js .fp-story[hidden]{display:none}
+/* the story toggle hides the other story only with the script on — by its
+   own class, so the town scope's hidden and the toggle compose */
+html.js .fp-off{display:none !important}
 
 /* the mode bar (specs/24) — says plainly whether you are reading or editing.
    Script-added under the section line in preview and studio modes; paper
