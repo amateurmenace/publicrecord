@@ -200,6 +200,15 @@
             <span class="cz-tag">your reel</span>
             <div class="cz-reelbody"></div>
           </section>
+          <section class="cz-block cz-stagebox" id="cz-stagebox" hidden>
+            <span class="cz-tag">preview</span>
+            <div class="cz-stage" id="cz-stage"></div>
+            <p class="cz-stagenow" id="cz-stagenow" role="status"></p>
+            <div class="cz-stageacts">
+              <button type="button" class="btn" data-cz="pvstop">■ stop</button>
+              <a class="btn cz-stageopen" href="${BASE}/" target="_blank" rel="noopener">open the tape ↗</a>
+            </div>
+          </section>
           <section class="cz-block">
             <span class="cz-tag">your paper</span>
             <div class="cz-paperbody"></div>
@@ -288,6 +297,8 @@
       // (specs/22 P1) are the meeting tray's, offered wherever the panel
       // stands: the cite sheet, and reel.json for a single-meeting reel.
       else if (act === "rtact") trayAct(+b.dataset.i, b.dataset.act);
+      else if (act === "pvplay") pvPlay(readReel(REEL_KEY)[+b.dataset.i]);
+      else if (act === "pvstop") pvPause();
       else if (act === "reelcite") { const c = readReel(REEL_KEY);
         if (c.length) copyText(citeSheet(trayMeta(c), c), "cite sheet copied — receipts for every clip"); }
       else if (act === "reeljson") { const c = readReel(REEL_KEY);
@@ -313,6 +324,7 @@
 
   function setMode(m) {
     if (!MODES.includes(m)) m = "preview";
+    if (m !== "studio") pvPause();   // a hidden stage must not keep playing
     writeMode(m); markMode(m); updateModeButtons();
     // the make-affordances on the record's cards follow the mode (never in
     // paper), and /app/p reading its own draft becomes — or stops being —
@@ -344,6 +356,7 @@
     // two of the three studio-state readers and left this one lying) — the
     // stored preference is still written for the next load, when it can be
     const v = !shownRail(); writeRail(v);
+    if (v) pvPause();   // the collapsed rail hides the stage — stop its tape
     document.documentElement.classList.toggle("cz-rail", shownMode() === "studio" && v);
     updateModeButtons();
   }
@@ -401,6 +414,8 @@
       const ae = document.activeElement;
       if (ae && ae.dataset && ae.dataset.cz === "rtact")
         focus = { act: ae.dataset.act, i: +ae.dataset.i };
+      else if (ae && ae.dataset && ae.dataset.cz === "pvplay")
+        focus = { act: "pvplay", i: +ae.dataset.i };
     }
     const url = reelShareURL(clips), meets = reelPids(clips).length;
     const span = meets > 1 ? ` · ${meets} meetings` : "";
@@ -422,10 +437,14 @@
           </span>
         </span>
         <span class="cz-racts">
+          <button type="button" class="cz-pact cz-rplay" data-cz="pvplay" data-i="${i}"
+            data-pvkey="${esc(clipKey(c))}"${c.video_id ? "" : " disabled"}
+            title="${c.video_id ? "preview here — the tape, in the studio" : "this meeting has no tape to preview"}"
+            aria-label="${c.video_id ? `preview clip ${i + 1} here, in the studio` : `clip ${i + 1} has no tape to preview`}">▶</button>
           <a class="cz-pact cz-rprev" href="${BASE}/m/${esc(c.pid || "")}#t${Math.floor(c.start)}"
             target="_blank" rel="noopener"
-            title="preview — the tape in a new tab"
-            aria-label="preview clip ${i + 1} in a new tab">▶</a>
+            title="open the tape in a new tab"
+            aria-label="open clip ${i + 1}’s tape in a new tab">↗</a>
           ${act("up", i, `move clip ${i + 1} up`, "↑", !i)}
           ${act("down", i, `move clip ${i + 1} down`, "↓", i === n - 1)}
           ${act("rm", i, `remove clip ${i + 1}`, "✕")}
@@ -446,9 +465,12 @@
          into your paper keeps a snapshot, and the tray keeps rolling.</p>`;
     if (mini) { mini.hidden = false; mini.href = url;
       mini.textContent = `▶ ${n} clip${n > 1 ? "s" : ""} · ${hms(reelRuntime(clips))}`; }
+    pvShow();   // the row being previewed keeps its mark across the repaint
     if (focus) {
       let t = focus.act === "row"
         ? $(`.cz-rclip[data-i="${focus.i}"] .cz-rquote`, body)
+        : focus.act === "pvplay"
+        ? $(`[data-cz="pvplay"][data-i="${focus.i}"]`, body)
         : $(`[data-cz="rtact"][data-act="${focus.act}"][data-i="${focus.i}"]`, body);
       // a move that landed on a pole: the arrow under the keyboard went
       // disabled — hand focus to the opposite arrow, NEVER the ✕ (the
@@ -730,6 +752,188 @@
                                     : `your paper — add “${name}”`);
     b.onclick = () => on ? removeStoryRef(ref) : addStoryRef(ref);
   }
+
+  /* ---- THE PREVIEW STAGE (specs/22 §5.3(b) / P2 — specs/23 B2) ------------
+     Hearing a clip before keeping it, without touching the page player.
+     One small player in the studio drawer, built on the first ▶ (this press
+     is the click-to-load consent), owned by the panel and living OUTSIDE
+     every node the panel repaints. Its laws, written before its code:
+       · SOURCE-GATED: the stage hears only messages from its own frame
+         (e.source === PV.win), and the page player hears only its own
+         (onYT gates on YT.win) — two engines, two dispatches, never one
+         message feeding both.
+       · ONE ENGINE SEEKS: starting the stage pauses the page player and any
+         reel it was playing; starting the page player (loadTape, ytSeek,
+         startReel) pauses the stage. Nothing ever seeks the other's frame.
+       · ITS OWN GATE: the stage arms only on a report inside the clip and
+         before its end, then pauses at the end — the /app/r armed gate,
+         reproduced for one clip; a tape switch settles 500 ms.
+       · ONE CLIP: the stage plays the clip it was asked for and stops.
+         Playing a sequence is /app/r's job and stays there.
+       · HIDDEN IS SILENT: leaving the studio or collapsing the rail pauses
+         the stage; a frame nobody can see must not keep talking. */
+  const PV = { win: null, ready: false, clip: null, armed: false, settling: false,
+               ended: false, vid: "", pending: null, wired: false,
+               playing: false, stopped: false, watch: 0 };
+  const PV_ORIGIN = "https://www.youtube-nocookie.com";
+  function pvSend(func, args) {
+    if (!PV.win) return;
+    const msg = func === "listening"
+      ? { event: "listening", id: "czstage", channel: "widget" }
+      : { event: "command", func, args: args || [] };
+    PV.win.postMessage(JSON.stringify(msg), PV_ORIGIN);
+  }
+  /* the one-engine rule, the page's half: whatever the page player was
+     doing stops when the stage speaks */
+  function pagePause() {
+    if (typeof YT !== "undefined") {
+      if (YT.win && YT.ready) ytSend("cmd", "pauseVideo", []);
+      // a page player still in its load gap would seek and play on ready —
+      // drop the stashed seek and ask onReady to hush it instead
+      if (YT.loaded && !YT.ready) { YT.pending = null; YT.hush = true; }
+    }
+    if (typeof REELPLAY !== "undefined" && REELPLAY && (REELPLAY.active || REELPLAY.pending)) {
+      REELPLAY.pending = null;
+      if (REELPLAY.active) { REELPLAY.active = false; REELPLAY.armed = false;
+        REELPLAY.paused = true; reelShow(); }
+    }
+  }
+  /* …and the stage's half: idempotent, safe before the stage exists */
+  function pvPause() {
+    clearTimeout(PV.watch);
+    // a stop before the frame is ready cannot reach it yet — remember it,
+    // and onReady silences the autoplay the frame was built with
+    if (!PV.ready && (PV.win || PV.pending || PV.vid)) PV.stopped = true;
+    if (PV.ready) pvSend("pauseVideo");
+    if (!PV.clip && !PV.pending) { PV.playing = false; return; }
+    PV.last = PV.clip || PV.pending || PV.last;   // the tape the frame still shows
+    PV.clip = null; PV.armed = false; PV.ended = false; PV.pending = null; PV.playing = false;
+    pvShow();
+  }
+  /* a trim of the clip the stage is previewing reaches the stage: its end
+     is the gate's end, its start the status line's */
+  function pvRetrim(clips) {
+    if (!PV.clip) return;
+    const key = clipKey(PV.clip);
+    const c = clips.find(x => clipKey(x) === key);
+    if (c && (c.start !== PV.clip.start || c.end !== PV.clip.end)) {
+      PV.clip = { ...PV.clip, start: c.start, end: c.end }; PV.ended = false; pvShow();
+    }
+  }
+  function pvPlay(clip) {
+    if (!clip) return;
+    if (!clip.video_id) { toast("this clip’s meeting has no tape to preview here"); return; }
+    const box = $("#cz-stagebox"); if (!box) return;
+    // a stage nobody can see must not play: open the studio (a paper's ▶
+    // in preview mode) and expand a collapsed rail (the phone's #edit door
+    // lands there) before a frame makes a sound
+    if (shownMode() !== "studio") { writeRail(false); setMode("studio"); }
+    else if (shownRail()) toggleRail();
+    pagePause();
+    box.hidden = false;
+    // the drawer scrolls: a stage below its fold is a sound with no frame
+    if (typeof box.scrollIntoView === "function") box.scrollIntoView({ block: "nearest" });
+    PV.stopped = false; PV.playing = false; clearTimeout(PV.watch);
+    PV.clip = clip; PV.armed = false; PV.ended = false;
+    // an autoplay the browser refused would read as "previewing" forever:
+    // if no time report lands, say so and hand the reader the frame's own ▶
+    PV.watch = setTimeout(() => {
+      if (PV.clip && !PV.playing && !PV.ended) { PV.blocked = true; pvShow(); }
+    }, 6000);
+    if (!PV.win && !PV.pending) {
+      // first use: the frame is built now — this ▶ is the click-to-load
+      const ifr = document.createElement("iframe");
+      ifr.className = "cz-stagefr";
+      ifr.allow = "autoplay; encrypted-media; picture-in-picture";
+      ifr.title = "the preview — one clip of the tape, in the studio";
+      ifr.src = `${PV_ORIGIN}/embed/${encodeURIComponent(clip.video_id)}`
+        + `?enablejsapi=1&autoplay=1&rel=0&start=${Math.floor(clip.start)}`;
+      ifr.addEventListener("load", () => { PV.win = ifr.contentWindow; pvSend("listening"); });
+      const st = $("#cz-stage"); if (st) { st.innerHTML = ""; st.appendChild(ifr); }
+      PV.vid = clip.video_id; PV.pending = clip;
+      if (!PV.wired) { PV.wired = true; window.addEventListener("message", onPV, false); }
+    } else if (!PV.ready) {
+      PV.pending = clip;                 // the frame is still loading — apply on ready
+    } else if (clip.video_id !== PV.vid) {
+      // another meeting's tape: load it, and let the stale reports of the
+      // swapped-out tape settle before the gate may arm
+      PV.vid = clip.video_id; PV.settling = true;
+      setTimeout(() => { PV.settling = false; }, 500);
+      pvSend("loadVideoById", [{ videoId: clip.video_id, startSeconds: clip.start }]);
+    } else {
+      pvSend("seekTo", [clip.start, true]); pvSend("playVideo");
+    }
+    pvShow();
+  }
+  function onPV(e) {
+    if (e.source !== PV.win) return;   // the stage hears only its own frame
+    if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
+    let d; try { d = JSON.parse(e.data); } catch { return; }
+    if (d.event === "onReady" || d.event === "initialDelivery") {
+      PV.ready = true; pvSend("listening");
+      if (PV.stopped || !PV.clip) { PV.stopped = false; pvSend("pauseVideo"); PV.pending = null; }
+      else if (PV.pending) {
+        const c = PV.pending; PV.pending = null;
+        if (c.video_id === PV.vid) { pvSend("seekTo", [c.start, true]); pvSend("playVideo"); }
+        else pvPlay(c);
+      }
+    }
+    if (d.info && typeof d.info.playerState === "number") {
+      // the reader pressed play inside the stage's own frame after a stop:
+      // that is the stage speaking, and the page player yields to it
+      if (d.info.playerState === 1 && !PV.clip && PV.last) { PV.clip = PV.last; PV.armed = true; PV.ended = false; pagePause(); pvShow(); }
+      if (d.info.playerState === 0 && PV.clip && !PV.ended) { PV.ended = true; PV.armed = false; pvShow(); }
+    }
+    if (d.info && typeof d.info.currentTime === "number") {
+      if (PV.clip && !PV.playing && d.info.playerState === 1) { PV.playing = true; PV.blocked = false; pvShow(); }
+      pvAdvance(d.info.currentTime);
+    }
+  }
+  /* the stage's gate, pure over (state, time): "arm" once a report lands
+     inside the clip and before its end; "stop" once armed and the end is
+     reached; nothing while settling or when no clip stands */
+  function pvStep(pv, t) {
+    const c = pv.clip;
+    if (!c || pv.settling || pv.ended) return null;
+    if (!pv.armed) return (t >= c.start - 0.75 && t < c.end - 0.12) ? "arm" : null;
+    return t >= c.end - 0.12 ? "stop" : null;
+  }
+  function pvAdvance(t) {
+    const a = pvStep(PV, t);
+    if (a === "arm") PV.armed = true;
+    else if (a === "stop") { pvSend("pauseVideo"); PV.armed = false; PV.ended = true; pvShow(); }
+  }
+  function pvShow() {
+    const now = $("#cz-stagenow"), open = $(".cz-stageopen");
+    const c = PV.clip;
+    const what = !c ? "stopped"
+      : PV.ended ? "played"
+      : PV.blocked ? "the tape hasn’t started — press ▶ on the frame to play it here"
+      : PV.playing ? "previewing" : "loading the tape…";
+    const line = !c ? what : `${what} · ${hms(c.start)}–${hms(c.end)}`
+        + (c.quote ? ` · “${cut(String(c.quote), 60)}”` : "")
+        + (c.mtitle ? ` · ${c.mtitle}` : "");
+    // a status region re-announces on every write — write only what changed
+    if (now && now.textContent !== line) now.textContent = line;
+    const shown = c || PV.last;   // after a stop the frame still shows the last tape
+    if (open) { open.href = shown ? `${BASE}/m/${encodeURIComponent(shown.pid || "")}#t${Math.floor(shown.start)}` : `${BASE}/`;
+      open.hidden = !shown; }
+    const key = c ? clipKey(c) : "";
+    $$("[data-pvkey]").forEach(b => { const on = !!c && b.dataset.pvkey === key;
+      b.classList.toggle("on", on);
+      if (on) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
+  }
+  /* a paper's reel rows (and any other surface) ask the stage through one
+     delegated press: the button carries the clip as data-* refs */
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-pvpid]");
+    if (!b) return;
+    e.preventDefault();
+    const d = b.dataset;
+    pvPlay({ pid: d.pvpid, video_id: d.pvvid || "", start: +d.pvstart || 0,
+             end: +d.pvend || 0, t: +d.pvt || +d.pvstart || 0,
+             kind: d.pvkind || "moment", quote: d.pvquote || "", mtitle: d.pvmtitle || "" });
+  });
 
   /* which story the open page could contribute — /app/m/<pid> or /app/i/<slug>.
      Pure string work on the path already parsed at the top of the file. */
@@ -1158,6 +1362,7 @@
     f.addEventListener("click", () => loadTape(f.dataset.video));
   }
   function loadTape(vid, seekTo) {
+    pvPause();   // one engine seeks (specs/23 B2)
     const f = $(".player.facade");
     if (f && !YT.loaded) {
       const ifr = document.createElement("iframe");
@@ -1178,6 +1383,8 @@
     YT.win.postMessage(JSON.stringify(msg), "https://www.youtube-nocookie.com");
   }
   function ytSeek(t) {
+    pvPause();   // one engine seeks (specs/23 B2)
+    YT.hush = false;
     YT.time = t; strip(t);
     // command-ready only after onReady; a click during the load gap stashes
     // into pending instead of posting into the void (and being lost)
@@ -1185,10 +1392,17 @@
     else YT.pending = t;
   }
   function onYT(e) {
+    // the page player hears only its own frame — the preview stage in the
+    // studio has a frame of its own, and its time reports must never feed
+    // this engine (specs/23 B2: source-gated dispatch)
+    if (e.source !== YT.win) return;
     if (!/^https:\/\/(www\.)?youtube(-nocookie)?\.com$/.test(e.origin)) return;
     let d; try { d = JSON.parse(e.data); } catch { return; }
     if (d.event === "onReady" || d.event === "initialDelivery") {
       YT.ready = true; ytSend("listening");
+      // the stage spoke while this player was loading: it stays silent
+      // until the reader asks it to play (one engine seeks — specs/23 B2)
+      if (YT.hush) { YT.hush = false; YT.pending = null; ytSend("cmd", "pauseVideo", []); return; }
       // a cross-meeting switch requested before the player was ready (a cite
       // tapped during the load gap) loads now, ahead of any stashed same-tape seek
       if (REELPLAY && REELPLAY.pending) {
@@ -1198,6 +1412,9 @@
         ytSend("cmd", "loadVideoById", [{ videoId: pv.vid, startSeconds: pv.start }]);
       } else if (YT.pending != null) { const p = YT.pending; YT.pending = null; ytSeek(p); }
     }
+    // the reader pressed play inside the page's own frame while the stage
+    // was speaking: the page is the engine now, the stage yields
+    if (d.info && d.info.playerState === 1 && PV.clip && !PV.ended) pvPause();
     if (d.info && typeof d.info.currentTime === "number") {
       YT.time = d.info.currentTime;
       followAlong(YT.time); strip(YT.time); tick(YT.time);
@@ -1869,6 +2086,7 @@
     // control, or the panel's — never the other one's
     if (CREEL) { CREEL.clips = clips; buildTray(origin === "tray" ? focus : null); paintTicks(); }
     paintCutTicks();
+    pvRetrim(clips);         // the stage follows a trim of the clip it plays
     refreshReelSummary(origin === "tray" ? undefined : focus);
     refreshPaperSummary();   // the "＋ your reel" count rides the tray
   }
@@ -2124,6 +2342,12 @@
     // deep link, and so does any click when the reel isn't playing
     $$(".reelcite", cites).forEach(a => a.addEventListener("click", ev => {
       const i = +a.dataset.i, c = REELPLAY.clips[i];
+      // a reel the stage paused resumes from the clip pressed
+      if (REELPLAY.paused && c.video_id) {
+        ev.preventDefault(); pvPause();
+        REELPLAY.paused = false; REELPLAY.active = true; REELPLAY.i = i; REELPLAY.armed = false;
+        reelSeek(c); reelShow(); return;
+      }
       if (!REELPLAY.active || !c.video_id) return;
       ev.preventDefault();
       REELPLAY.i = i; REELPLAY.armed = false;
@@ -2194,6 +2418,8 @@
     land();
   }
   function startReel(clips) {
+    pvPause();   // one engine seeks (specs/23 B2)
+    REELPLAY.paused = false;
     // begin at the first clip that has a tape — a reel that opens on an
     // audio-only meeting still plays its later, playable clips
     let i = 0; while (i < clips.length && !clips[i].video_id) i++;
@@ -2260,7 +2486,9 @@
       ? ` <span class="rn-from">${esc(c.mtitle)}</span>` : "";
     if (now) {
       now.hidden = false;
-      now.innerHTML = (done || !c)
+      now.innerHTML = REELPLAY.paused && c
+        ? `<b>paused for the preview</b> — tap a clip below to go on from it`
+        : (done || !c)
         ? `<b>reel complete</b> — ${REELPLAY.clips.length} clip${REELPLAY.clips.length > 1 ? "s" : ""} played`
         : `<span class="rn-ord">clip ${REELPLAY.i + 1} of ${REELPLAY.clips.length}</span>`
           + `<span class="ts">${hms(c.start)}</span> `
@@ -3119,6 +3347,7 @@
     const editing = from === "draft" && shownMode() === "studio";
     el.classList.toggle("cz-editing", editing);
     if (editing) {
+      setTimeout(pvShow, 0);   // the stage's mark on a reel row survives the repaint
       // the draft may have moved under the awaits (a keystroke on this
       // page's own title or note, another tab): paint what stands NOW. A
       // changed shape starts over from the fresh draft; a changed title or
@@ -3150,6 +3379,7 @@
       .filter(Boolean).join("");
     // a title-only paper is a sanctioned form — say what it is, not that its
     // (nonexistent) blocks were curated away
+    setTimeout(pvShow, 0);     // the stage's mark on a reel row survives the repaint
     el.innerHTML = head + (blocks
       || (doc.blocks.length
         ? `<p class="hint">This paper’s blocks aren’t in this pressing of the
@@ -3212,20 +3442,28 @@
         return { ...c, end, t: mo ? r1(mo.t) : c.start,
                  kind: mo ? mo.kind : "cut",
                  quote: mo ? mo.quote : (lines ? cut(lineAt(lines, c.start), 120) : ""),
-                 mtitle: m.title || "" };
+                 mtitle: m.title || "", video_id: m.video_id || "" };
       }).filter(Boolean);
       if (!clips.length)
         return b.clips.some(c => !tried.m.has(c.pid))
           ? paperBudget("a reel") : paperGone("a reel (its meetings)");
       const multi = reelPids(clips).length > 1;
+      // each cite is a link into the record; beside it (a sibling, never a
+      // control inside a link) a ▶ that plays the clip in the studio's
+      // preview stage — painted only in studio mode, the paper's own
+      // deep green, so the rendered paper stays as quiet as today
       const rows = clips.map((c, i) =>
-        `<a class="reelcite" href="${BASE}/m/${esc(c.pid)}#t${Math.floor(c.t)}">
+        `<div class="pb-cite"><a class="reelcite" href="${BASE}/m/${esc(c.pid)}#t${Math.floor(c.t)}">
           <span class="rc-ord">${i + 1}</span>
           <span class="rc-body">${multi ? `<span class="rc-from">${esc(c.mtitle || c.pid)}</span>` : ""}
             <span class="rc-quote">${esc(c.quote || "(moment)")}</span>
             <span class="rc-meta"><span class="rt-kind">${esc(c.kind)}</span>
               <span class="ts">${hms(c.start)}</span>–<span class="ts">${hms(c.end)}</span></span>
-          </span></a>`).join("");
+          </span></a>${c.video_id ? `<button type="button" class="pb-pv" data-pvpid="${esc(c.pid)}"
+            data-pvvid="${esc(c.video_id)}" data-pvstart="${r1(c.start)}" data-pvend="${r1(c.end)}"
+            data-pvt="${r1(c.t)}" data-pvkind="${esc(c.kind)}" data-pvquote="${esc(cut(String(c.quote || ""), 120))}"
+            data-pvmtitle="${esc(c.mtitle)}" data-pvkey="${esc(clipKey({ pid: c.pid, kind: c.kind, t: c.t }))}"
+            title="preview this clip in the studio" aria-label="preview clip ${i + 1} in the studio">▶</button>` : ""}</div>`).join("");
       return `<section class="pb-reel">
           <div class="sectionhead"><span class="kicker">a reel —
             ${clips.length} moment${clips.length > 1 ? "s" : ""}${multi

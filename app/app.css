@@ -1344,6 +1344,36 @@ html.cz-m-studio .cz-edstart:focus-visible,html.cz-m-studio .cz-edq:focus-visibl
 html.cz-m-studio .cz-ednote:focus-visible,html.cz-m-studio .cz-edpanel .btn:focus-visible{
   outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
 
+/* --- the preview stage (specs/22 P2 / specs/23 B2): one small player in the
+   studio drawer, built on the first ▶, owned by the panel and living outside
+   every repainted node. The frame's line wears the studio accent; the tape is
+   the tape. Hidden (paper mode, the rail) means paused — the JS holds that. --- */
+.cz-stagebox[hidden]{display:none}
+.cz-stage{position:relative;aspect-ratio:16/9;background:var(--surface-inverse);
+  border-radius:var(--radius-sm);overflow:hidden;
+  border:var(--border-w-strong) solid var(--studio-accent, var(--border-strong))}
+.cz-stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.cz-stagenow{font:var(--weight-medium) var(--text-xs)/1.4 var(--font-mono);
+  color:var(--text-secondary);margin:var(--space-2) 0 0;min-height:1.4em;overflow-wrap:anywhere}
+.cz-stageacts{display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)}
+.cz-stageacts .btn{font-size:var(--text-xs)}
+.cz-rplay.on{color:var(--studio-accent-text, var(--accent));
+  outline:var(--border-w) solid var(--studio-accent, var(--accent));outline-offset:1px;border-radius:var(--radius-sm)}
+.cz-rplay[disabled]{opacity:.35;cursor:default}
+.cz-stageopen[hidden]{display:none}
+/* a paper's reel rows: the cite stays a link; a ▶ sits beside it as a
+   sibling — painted ONLY in the studio, in the paper's own deep green */
+.pb-cite{display:flex;gap:6px;align-items:stretch}
+.pb-cite>.reelcite{flex:1;min-width:0}
+.pb-pv{display:none}
+html.cz-m-studio .pb-pv{display:inline-flex;align-items:center;justify-content:center;
+  flex:0 0 auto;min-width:32px;min-height:24px;align-self:center;
+  font:var(--weight-bold) var(--text-sm)/1 var(--font-mono);cursor:pointer;
+  background:var(--surface-card);color:var(--accent);
+  border:var(--border-w) solid var(--accent);border-radius:var(--radius-sm);padding:6px 8px}
+html.cz-m-studio .pb-pv:hover,html.cz-m-studio .pb-pv.on{background:var(--accent);color:var(--text-inverse)}
+html.cz-m-studio .pb-pv:focus-visible{outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
+
 /* --- the paper-mode tab (flat: the ink surface is its own separation) --- */
 .cz-tab{align-items:center;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);
   letter-spacing:var(--tracking-label);background:var(--surface-inverse);
