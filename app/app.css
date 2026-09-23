@@ -312,6 +312,12 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   text-decoration-color:var(--border-strong)}
 .fp-lede a:hover,.fp-told a:hover,.fp-say a:hover{color:var(--accent);text-decoration-color:var(--accent)}
 .fp-told{font-size:var(--text-md);line-height:var(--leading-body);max-width:72ch;margin:var(--space-2) 0}
+.fp-draft{max-width:72ch;margin:var(--space-3) 0 var(--space-1);padding-left:var(--space-3);
+  border-left:var(--border-w-strong) solid var(--border-strong)}
+.fp-draft p,.pb-rddraft p,.card.draft p{margin:0 0 var(--space-2);line-height:var(--leading-body)}
+.fp-draft .ts,.pb-rddraft .ts,.card.draft .ts{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--accent)}
+.pb-rddraft{margin:var(--space-2) 0 var(--space-3);padding-left:var(--space-3);
+  border-left:var(--border-w-strong) solid var(--border-strong)}
 .fp-part{margin-top:var(--space-6)}
 .fp-say{font-size:var(--text-sm);color:var(--text-secondary);max-width:72ch;margin-top:var(--space-2);
   line-height:var(--leading-body)}

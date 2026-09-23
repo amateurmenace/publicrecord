@@ -4615,6 +4615,14 @@
      and what was named, where the pushback was — for a meeting; the
      milestones in order, for an issue. Extractive, receipts throughout, no
      model: the analyzer's read, pressed, said as a reading. */
+  /* a model's paragraphs with their receipts as links — escaped first,
+     linked after: a draft is untrusted text */
+  function receiptParas(text, hrefBase) {
+    return String(text || "").split(/\n+/).map(p => p.trim()).filter(Boolean).map(p =>
+      `<p>${esc(p).replace(/\[(\d{1,3}):(\d\d)(?::(\d\d))?\]/g, (m0, a, c, s) => {
+        const sec = s != null ? (+a * 3600 + +c * 60 + +s) : (+a * 60 + +c);
+        return `<a class="ts" href="${hrefBase}#t${sec}">[${m0.slice(1, -1)}]</a>`; })}</p>`).join("");
+  }
   function renderReading(b, mby, iby, tried) {
     const part = (kicker, rows) => rows ? `<div class="pb-rdpart"><span class="kicker">${kicker}</span>${rows}</div>` : "";
     const row = (href, t, tag, text) => `<a class="pb-rdrow" href="${href}"><span class="ts">${hms(t)}</span>`
@@ -4628,7 +4636,13 @@
         v: (Array.isArray(ents[k]) ? ents[k] : []).slice(0, 6)
           .map(e => typeof e === "string" ? e : (e && (e.name || e.text)) || "").filter(Boolean) }))
         .filter(x => x.v.length);
-      const body = part("what was decided", (an.decisions || []).slice(0, 8).map(d => row(at(d.t), d.t, d.outcome, d.text)).join(""))
+      // the reading's draft (specs/24 §4): a model's paragraphs under the
+      // model's own name, receipts linked — beside the counted parts
+      const d = an.draft && typeof an.draft === "object" && typeof an.draft.text === "string"
+        && /^ai:/.test(String(an.draft.origin || "")) ? an.draft : null;
+      const drafted = d ? `<div class="pb-rddraft">${receiptParas(d.text, `${BASE}/m/${esc(b.pid)}`)}
+        <p class="pb-chartsrc">the reading, drafted by a model — ${esc(d.origin)}, labeled — check it against the tape</p></div>` : "";
+      const body = drafted + part("what was decided", (an.decisions || []).slice(0, 8).map(d => row(at(d.t), d.t, d.outcome, d.text)).join(""))
         + part("what was asked", (an.questions || []).slice(0, 8).map(q => row(at(q.t), q.t, q.type, q.text)).join(""))
         + part("where the pushback was", (an.tension || []).slice(0, 5).map(d => row(at(d.t), d.t, "", d.text)).join(""))
         + part("who and what was named", names.map(x =>
