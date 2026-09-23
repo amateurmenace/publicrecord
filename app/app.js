@@ -76,6 +76,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     initScope();
     initStudio();
+    wireStoryTabs();   // the front page's two stories, one at a time (specs/24)
     if (/\/app\/m\//.test(path)) meeting();
     else if (/\/app\/r$/.test(path)) reel();
     else if (/\/app\/p$/.test(path)) paper();
@@ -235,6 +236,7 @@
     STUDIO = aside;
     wireStudio();
     updateModeButtons();
+    paintModeBar();   // the mode bar says which mode the page is in (specs/24)
     refreshReelSummary();
     refreshPaperSummary();   // paints the card affordances too (A2)
     // another tab that ticks a moment (or edits the paper, or clears either)
@@ -313,6 +315,7 @@
       else if (act === "preel") addReelToPaper();
       else if (act === "pnote") addNoteToPaper();
       else if (act === "pchart") addChartToPaper(b.dataset.chart, b.dataset.ref || "");
+      else if (act === "pread") addReadingToPaper(b.dataset.ref || "");
       else if (act === "ptpl") applyPaperTemplate(b.dataset.tpl);
       else if (act === "pup" || act === "pdown" || act === "pdel")
         movePaperBlock(+b.dataset.i, act);
@@ -326,10 +329,74 @@
     });
   }
 
+  /* ---- the mode bar (specs/24) — says plainly whether you are reading or
+     editing. Script-added under the section line in preview and studio
+     modes (paper mode carries no chrome), painted from shownMode() — the
+     painted truth — never from storage. Read / Edit are the two words the
+     reader needs; the footprint pill and the studio's own controls stay. */
+  function paintModeBar() {
+    const nav = $(".sectionnav"); if (!nav) return;
+    let bar = $(".cz-modebar");
+    if (!bar) {
+      bar = document.createElement("div"); bar.className = "cz-modebar";
+      bar.setAttribute("role", "region"); bar.setAttribute("aria-label", "reading or editing");
+      bar.innerHTML = `<span class="cz-modebar-state"></span><span class="cz-modebar-say"></span>
+        <span class="cz-modebar-seg" role="radiogroup" aria-label="read or edit">
+          <button type="button" role="radio" data-czmode="preview">Read</button>
+          <button type="button" role="radio" data-czmode="studio">Edit</button></span>`;
+      nav.insertAdjacentElement("afterend", bar);
+      bar.addEventListener("click", e => {
+        const b = e.target.closest && e.target.closest("[data-czmode]");
+        if (b && bar.contains(b)) setMode(b.dataset.czmode);
+      });
+      // arrow keys move the choice, as on the footprint control
+      bar.addEventListener("keydown", e => {
+        const b = e.target.closest && e.target.closest("[data-czmode]"); if (!b) return;
+        if (["ArrowLeft", "ArrowUp"].includes(e.key)) { e.preventDefault(); setMode("preview"); }
+        else if (["ArrowRight", "ArrowDown"].includes(e.key)) { e.preventDefault(); setMode("studio"); }
+      });
+    }
+    const m = shownMode();
+    $(".cz-modebar-state", bar).textContent = m === "studio" ? "Editing — the studio" : "Reading the record";
+    $(".cz-modebar-say", bar).textContent = m === "studio"
+      ? "what you add lands in your paper, in this browser — nothing is uploaded"
+      : "nothing here changes until you press Edit";
+    $$("[data-czmode]", bar).forEach(b => { const on = b.dataset.czmode === m;
+      b.setAttribute("aria-checked", on ? "true" : "false"); b.tabIndex = on ? 0 : -1; });
+  }
+  /* ---- the front page's two stories (specs/24) — one shows at a time.
+     The page presses both; this turns the two tab links into a toggle,
+     remembers the choice in this browser (and nowhere else), and says which
+     story is showing (aria-current on the tab, hidden on the other story).
+     With the script off both stories stand and the tabs are anchors. */
+  const STORY_KEY = "cz-front-story";
+  function wireStoryTabs() {
+    const nav = $(".stab"); if (!nav) return;
+    const tabs = $$(".stab-a", nav);
+    const stories = { "over-time": $("#over-time"), latest: $("#latest") };
+    if (!tabs.length || !stories["over-time"] || !stories.latest) return;
+    document.documentElement.classList.add("js");
+    let want = "over-time";
+    try { const s = localStorage.getItem(STORY_KEY); if (s === "latest") want = s; } catch { /* private mode */ }
+    if (location.hash === "#latest") want = "latest"; else if (location.hash === "#over-time") want = "over-time";
+    const show = (which, focus) => {
+      for (const k of Object.keys(stories)) stories[k].hidden = k !== which;
+      tabs.forEach(t => t.setAttribute("aria-current", t.dataset.story === which ? "true" : "false"));
+      try { localStorage.setItem(STORY_KEY, which); } catch { /* private mode */ }
+      if (focus) { const h = $("h2", stories[which]); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); } }
+    };
+    show(want, false);
+    nav.addEventListener("click", e => {
+      const a = e.target.closest && e.target.closest(".stab-a");
+      if (!a || !nav.contains(a) || !stories[a.dataset.story]) return;
+      e.preventDefault(); show(a.dataset.story, true);
+      if (history.replaceState) history.replaceState(null, "", "#" + a.dataset.story);
+    });
+  }
   function setMode(m) {
     if (!MODES.includes(m)) m = "preview";
     if (m !== "studio") pvPause();   // a hidden stage must not keep playing
-    writeMode(m); markMode(m); updateModeButtons();
+    writeMode(m); markMode(m); updateModeButtons(); paintModeBar();
     // the make-affordances on the record's cards follow the mode (never in
     // paper), and /app/p reading its own draft becomes — or stops being —
     // the editor (specs/23 A2/A3)
@@ -574,8 +641,15 @@
     const chartMenu = `<details class="cz-chartadd">
         <summary>＋ a chart</summary>
         <div class="cz-chartmenu">
-          ${ref && ref.story === "meeting" ? chartBtn("framing", ref.pid, "this meeting’s framing") : ""}
-          ${ref && ref.story === "issue" ? chartBtn("reach", ref.slug, "this issue’s reach") : ""}
+          ${ref && ref.story === "meeting"
+            ? chartBtn("numbers", "m:" + ref.pid, "this meeting in numbers")
+              + chartBtn("shape", ref.pid, "the shape of this meeting")
+              + chartBtn("votes", ref.pid, "this meeting’s roll calls")
+              + chartBtn("framing", ref.pid, "this meeting’s framing") : ""}
+          ${ref && ref.story === "issue"
+            ? chartBtn("numbers", "i:" + ref.slug, "this issue in numbers")
+              + chartBtn("ledger", ref.slug, "every roll call along its way")
+              + chartBtn("reach", ref.slug, "this issue’s reach") : ""}
           ${chartBtn("votes", "", "votes over time")}
           ${chartBtn("framing", "", "the record’s framing")}
           ${chartBtn("topics", "", "recurring topics")}
@@ -583,6 +657,7 @@
     const adds =
         (ref ? `<button type="button" class="btn" data-cz="padd">＋ ${ref.story === "issue" ? "this issue" : "this meeting"}</button>` : "")
       + (clips.length ? `<button type="button" class="btn" data-cz="preel">＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})</button>` : "")
+      + (ref ? `<button type="button" class="btn" data-cz="pread" data-ref="${esc(ref.story === "meeting" ? "m:" + ref.pid : "i:" + ref.slug)}">＋ the record’s reading</button>` : "")
       + `<button type="button" class="btn" data-cz="pnote">＋ a note</button>`
       + chartMenu;
     // an empty note is arranging surface, not traveling content — the share
@@ -2684,7 +2759,12 @@
   // v=3 is the rich tier whole — layouts (C1) and the three ref kinds (C2)
   // shipped in ONE edition (v2.1.14), so no reader ever holds a decoder that
   // knows one grammar and not the other; a fourth grammar mints v=4
-  const paperV = p => p.blocks.some(b => b.layout || C2_KINDS.includes(b.kind)) ? "3"
+  // v=4: the two paths' kinds (specs/24) — a numbers / shape / ledger chart,
+  // one meeting's votes, the record's reading; inlined so the twin that
+  // lifts this line alone still runs
+  const paperV = p => p.blocks.some(b => b.kind === "reading" || (b.kind === "chart"
+      && (b.chart === "numbers" || b.chart === "shape" || b.chart === "ledger" || (b.chart === "votes" && !!b.pid)))) ? "4"
+    : p.blocks.some(b => b.layout || C2_KINDS.includes(b.kind)) ? "3"
     : p.blocks.some(b => b.kind === "note" || b.kind === "chart") ? "2" : "1";
   /* does anything actually TRAVEL — a title, or a block that survives
      portablePaper (an empty note does not). The share row, the title
@@ -2719,7 +2799,24 @@
        reach   — one issue's appearances, meeting by meeting (issues/<slug>)
        framing — the eight civic lenses: one meeting (pid) or the whole record
        topics  — what keeps coming back                 (analytics.json) */
-  const PAPER_CHARTS = ["votes", "reach", "framing", "topics"];
+  const PAPER_CHARTS = ["votes", "reach", "framing", "topics", "numbers", "shape", "ledger"];
+  /* specs/24 — the two paths' kinds. A link carrying one is v=4; a reader
+     from before them drops what it does not know (fewer blocks, never a
+     throw), so an old reader reads a v4 paper with holes and says nothing
+     false. numbers: a meeting's or an issue's; shape: a meeting's moments on
+     its own time axis; ledger: an issue's roll calls across meetings; votes
+     with a pid: one meeting's roll calls; reading: the record's own reading
+     of a meeting or an issue — decisions, questions, names, milestones —
+     computed at render, refs only, no model. */
+  const NEW_KIND = b => b.kind === "reading" || (b.kind === "chart"
+    && (["numbers", "shape", "ledger"].includes(b.chart) || (b.chart === "votes" && !!b.pid)));
+  /* m:<pid> | i:<slug> → {pid} | {slug}, or null for anything else — the one
+     ref form a numbers chart and a reading travel by, since either may name
+     a meeting or an issue */
+  const oneRef = s => {
+    const m = /^([mi]):(.+)$/.exec(String(s || "")); if (!m || !PAPER_REF.test(m[2])) return null;
+    return m[1] === "m" ? { pid: m[2] } : { slug: m[2] };
+  };
   /* cut a string at a cap WITHOUT stranding half a surrogate pair — and
      drop any lone surrogate already inside it (a hand-edited draft can hold
      one; JSON round-trips it). encodeURIComponent THROWS on a lone half,
@@ -2900,6 +2997,36 @@
       if (typeof b.title === "string") nb.title = b.title;
       return nb;
     }
+    // specs/24: numbers (a meeting or an issue, exactly one), shape (a
+    // meeting), ledger (an issue), votes of one meeting, and the reading
+    if (b.kind === "chart" && b.chart === "numbers") {
+      if (typeof b.pid === "string" && PAPER_REF.test(b.pid) && b.slug == null) {
+        const nb = { kind: "chart", chart: "numbers", pid: b.pid };
+        if (typeof b.title === "string") nb.title = b.title; return nb; }
+      if (typeof b.slug === "string" && PAPER_REF.test(b.slug) && b.pid == null) {
+        const nb = { kind: "chart", chart: "numbers", slug: b.slug };
+        if (typeof b.name === "string") nb.name = b.name; return nb; }
+      return null;
+    }
+    if (b.kind === "chart" && (b.chart === "shape" || (b.chart === "votes" && b.pid != null))) {
+      if (typeof b.pid !== "string" || !PAPER_REF.test(b.pid)) return null;
+      const nb = { kind: "chart", chart: b.chart, pid: b.pid };
+      if (typeof b.title === "string") nb.title = b.title; return nb;
+    }
+    if (b.kind === "chart" && b.chart === "ledger") {
+      if (typeof b.slug !== "string" || !PAPER_REF.test(b.slug)) return null;
+      const nb = { kind: "chart", chart: "ledger", slug: b.slug };
+      if (typeof b.name === "string") nb.name = b.name; return nb;
+    }
+    if (b.kind === "reading") {
+      if (typeof b.pid === "string" && PAPER_REF.test(b.pid) && b.slug == null) {
+        const nb = { kind: "reading", pid: b.pid };
+        if (typeof b.title === "string") nb.title = b.title; return nb; }
+      if (typeof b.slug === "string" && PAPER_REF.test(b.slug) && b.pid == null) {
+        const nb = { kind: "reading", slug: b.slug };
+        if (typeof b.name === "string") nb.name = b.name; return nb; }
+      return null;
+    }
     if (b.kind === "chart" && (b.chart === "votes" || b.chart === "topics"
         || b.chart === "framing"))
       return { kind: "chart", chart: b.chart };
@@ -2945,11 +3072,11 @@
         : b.kind === "note"
           ? { kind: "note", text: b.text }
         : b.kind === "chart"
-          ? (b.chart === "reach"
-              ? { kind: "chart", chart: "reach", slug: b.slug }
-            : b.pid
-              ? { kind: "chart", chart: "framing", pid: b.pid }
-              : { kind: "chart", chart: b.chart })
+          ? (b.slug ? { kind: "chart", chart: b.chart, slug: b.slug }
+            : b.pid ? { kind: "chart", chart: b.chart, pid: b.pid }
+            : { kind: "chart", chart: b.chart })
+        : b.kind === "reading"
+          ? (b.pid ? { kind: "reading", pid: b.pid } : { kind: "reading", slug: b.slug })
         : b.story === "issue"
           ? { kind: "story", story: "issue", slug: b.slug }
           : { kind: "story", story: "meeting", pid: b.pid }, b)),
@@ -2977,9 +3104,16 @@
       : b.kind === "quote" ? `q.${encodeURIComponent(b.pid)}:${r1(b.t)}`
       : b.kind === "doc" ? `d.${encodeURIComponent(b.pid)}~${encodeURIComponent(b.doc)}`
       : b.kind === "digest" ? `g.${encodeURIComponent(b.slug)}:${b.n}`
+      // specs/24: a numbers chart and a reading name a meeting OR an issue —
+      // the ref says which (m:<pid> | i:<slug>; encodeURIComponent spells the
+      // colon %3A, and no pid or slug holds one). a.<ref> is the reading.
+      : b.kind === "chart" && b.chart === "numbers"
+        ? "c.numbers." + encodeURIComponent(b.pid ? "m:" + b.pid : "i:" + b.slug)
       : b.kind === "chart"
         ? "c." + b.chart + (b.slug || b.pid
             ? "." + encodeURIComponent(b.slug || b.pid) : "")
+      : b.kind === "reading"
+        ? "a." + encodeURIComponent(b.pid ? "m:" + b.pid : "i:" + b.slug)
       : b.story === "issue" ? "i." + encodeURIComponent(b.slug)
       : "m." + encodeURIComponent(b.pid));
     // layouts ride a separate `l=` (C1): <block index>:<layout> pairs, so a
@@ -3085,20 +3219,39 @@
         const chart = dot2 < 0 ? rest : rest.slice(0, dot2);
         if (!PAPER_CHARTS.includes(chart)) return;
         if (dot2 < 0) {
-          // bare forms: votes, topics, framing (the whole record) — reach
-          // needs its issue, so a bare reach is a mangle, not a chart
-          if (chart !== "reach") out.blocks.push({ kind: "chart", chart });
+          // bare forms: votes, topics, framing (the whole record) — reach,
+          // numbers, shape and ledger need their ref, so a bare one is a
+          // mangle, not a chart
+          if (!["reach", "numbers", "shape", "ledger"].includes(chart))
+            out.blocks.push({ kind: "chart", chart });
         } else {
           let ref = "";
           try { ref = decodeURIComponent(rest.slice(dot2 + 1)).trim(); }
           catch { return; }
+          if (chart === "numbers") {
+            // m:<pid> | i:<slug> — the one ref form that says which
+            const one = /^([mi]):(.+)$/.exec(ref);
+            if (one && PAPER_REF.test(one[2]))
+              out.blocks.push(one[1] === "m" ? { kind: "chart", chart: "numbers", pid: one[2] }
+                                             : { kind: "chart", chart: "numbers", slug: one[2] });
+            return;
+          }
           if (!PAPER_REF.test(ref)) return;
           if (chart === "reach")
             out.blocks.push({ kind: "chart", chart: "reach", slug: ref });
-          else if (chart === "framing")
-            out.blocks.push({ kind: "chart", chart: "framing", pid: ref });
-          // votes/topics carry no ref — a reffed one is a mangle, dropped
+          else if (chart === "ledger")
+            out.blocks.push({ kind: "chart", chart: "ledger", slug: ref });
+          else if (chart === "framing" || chart === "shape" || chart === "votes")
+            out.blocks.push({ kind: "chart", chart, pid: ref });
+          // topics carries no ref — a reffed one is a mangle, dropped
         }
+      } else if (kind === "a") {
+        // the record's reading of a meeting (m:<pid>) or an issue (i:<slug>)
+        let ref = "";
+        try { ref = decodeURIComponent(rest).trim(); } catch { return; }
+        const one = /^([mi]):(.+)$/.exec(ref);
+        if (one && PAPER_REF.test(one[2]))
+          out.blocks.push(one[1] === "m" ? { kind: "reading", pid: one[2] } : { kind: "reading", slug: one[2] });
       }
     }
   }
@@ -3304,19 +3457,25 @@
      from the record — never stored numbers. */
   async function addChartToPaper(chart, refv, at) {
     if (!PAPER_CHARTS.includes(chart)) return;
+    // a ref names a meeting or an issue: m:<pid> / i:<slug> say which; a bare
+    // ref means what the chart's kind implies (reach, ledger: an issue;
+    // framing, shape, votes: a meeting)
+    const isIssue = /^i:/.test(refv || "")
+      || (!/^m:/.test(refv || "") && (chart === "reach" || chart === "ledger"));
+    const ref = String(refv || "").replace(/^[mi]:/, "");
     const dup = p => p.blocks.some(b => b.kind === "chart" && b.chart === chart
-      && ((b.slug || b.pid || "") === (refv || "")));
+      && ((b.slug || b.pid || "") === ref));
     if (dup(readPaper())) { toast("this chart is already in your paper"); return; }
     let nb;
-    if (chart === "reach") {
-      if (!refv) { toast("open an issue to chart its reach"); return; }
-      const it = await getJSON(`${BASE}/issues/${encodeURIComponent(refv)}.json`) || {};
-      nb = normalizeBlock({ kind: "chart", chart: "reach", slug: refv,
-                            name: it.name || "" });
-    } else if (chart === "framing" && refv) {
-      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(refv)}.json`) || {};
-      nb = normalizeBlock({ kind: "chart", chart: "framing", pid: refv,
-                            title: m.title || "" });
+    if (chart === "reach" || chart === "ledger" || (chart === "numbers" && isIssue)) {
+      if (!ref) { toast("open an issue to chart it"); return; }
+      const it = await getJSON(`${BASE}/issues/${encodeURIComponent(ref)}.json`) || {};
+      nb = normalizeBlock({ kind: "chart", chart, slug: ref, name: it.name || "" });
+    } else if (ref && (chart === "framing" || chart === "shape" || chart === "votes" || chart === "numbers")) {
+      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(ref)}.json`) || {};
+      nb = normalizeBlock({ kind: "chart", chart, pid: ref, title: m.title || "" });
+    } else if (chart === "shape" || chart === "numbers") {
+      toast("open a meeting or an issue to chart it"); return;
     } else {
       nb = normalizeBlock({ kind: "chart", chart });
     }
@@ -3331,6 +3490,31 @@
       toast("this browser blocks storage — your paper can’t be kept here"); return; }
     afterAdd(i, at);
     toast("chart added — it draws from the record when your paper renders");
+  }
+  /* the record's reading of a meeting or an issue (specs/24) — a ref block
+     like a chart; the words are the analyzer's, computed at render */
+  async function addReadingToPaper(refv, at) {
+    const one = oneRef(refv); if (!one) return;
+    const dup = p => p.blocks.some(b => b.kind === "reading" && (b.pid || b.slug) === (one.pid || one.slug));
+    if (dup(readPaper())) { toast("the record’s reading of this is already in your paper"); return; }
+    let nb;
+    if (one.pid) {
+      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(one.pid)}.json`) || {};
+      nb = normalizeBlock({ kind: "reading", pid: one.pid, title: m.title || "" });
+    } else {
+      const it = await getJSON(`${BASE}/issues/${encodeURIComponent(one.slug)}.json`) || {};
+      nb = normalizeBlock({ kind: "reading", slug: one.slug, name: it.name || "" });
+    }
+    if (!nb) return;
+    const p = readPaper();
+    if (dup(p)) { toast("the record’s reading of this is already in your paper"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) {
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast("the record’s reading added — it reads from the record when your paper renders");
   }
   /* a template (P3): a pre-shaped paper the editor starts from — the same
      blocks the panel's own buttons add, written in one press, client-side
@@ -3353,20 +3537,58 @@
                 { kind: "chart", chart: "framing" },
                 { kind: "note", text: "" }];
     } else if (t === "issue" && ref && ref.story === "issue") {
+      // path two (specs/24): how it moved — the issue, its numbers, its
+      // reach, what changed, every roll call along the way, then and now
+      // (its first word and its latest, read off their tapes), the record's
+      // reading meeting by meeting, and the note. A block whose plane holds
+      // nothing is not written: a story never opens with an empty chart.
       const it = await getJSON(`${BASE}/issues/${encodeURIComponent(ref.slug)}.json`) || {};
-      title = `${it.name || ref.slug}, watched`;
+      const name = it.name || ref.slug;
+      const tl = (it.timeline || []).filter(n => n && typeof n === "object" && n.pid);
+      const first = tl[0], last = tl[tl.length - 1];
+      const bead = n => n && (n.beads || []).find(x => x && typeof x.t === "number");
+      const quoteOf = n => ({ kind: "quote", pid: n.pid, t: bead(n).t, text: bead(n).text || "",
+                              title: n.title || "", layout: "half" });
+      title = `${name} — how it moved`;
       blocks = [{ kind: "story", story: "issue", slug: ref.slug, layout: "lead",
                   name: it.name || "", n_meetings: it.n_meetings,
                   first_seen: it.first_seen || "", last_seen: it.last_seen || "" },
-                { kind: "chart", chart: "reach", slug: ref.slug, name: it.name || "" },
+                { kind: "chart", chart: "numbers", slug: ref.slug, name },
+                ...(tl.length ? [{ kind: "chart", chart: "reach", slug: ref.slug, name }] : []),
+                ...(tl.length > 1 ? [{ kind: "digest", slug: ref.slug, n: Math.min(6, tl.length), name }] : []),
+                ...((it.ledger || []).length ? [{ kind: "chart", chart: "ledger", slug: ref.slug, name }] : []),
+                ...(first && bead(first) ? [quoteOf(first)] : []),
+                ...(last && last !== first && bead(last) ? [quoteOf(last)] : []),
+                ...(tl.length ? [{ kind: "reading", slug: ref.slug, name }] : []),
                 { kind: "note", text: "" }];
     } else if (t === "meeting" && ref && ref.story === "meeting") {
+      // path one (specs/24): what happened — the meeting, its numbers, the
+      // shape of the tape, the three moments that decided it (the loudest
+      // roll call, decision or pushback, never two from one second), its
+      // roll calls, how it was framed, the record's reading, its filings,
+      // and the note. Blocks whose plane holds nothing are not written.
       const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(ref.pid)}.json`) || {};
-      title = `${m.title || ref.pid}, covered`;
+      const mtitle = m.title || ref.pid;
+      const top = [], secs = new Set();
+      for (const mo of (m.moments || [])
+          .filter(mo => mo && typeof mo.t === "number" && ["vote", "decision", "tension"].includes(mo.kind))
+          .sort((a, c) => (+c.score || 0) - (+a.score || 0))) {
+        if (secs.has(Math.floor(mo.t))) continue;
+        secs.add(Math.floor(mo.t)); top.push(mo);
+        if (top.length === 3) break;
+      }
+      title = `${mtitle} — what happened`;
       blocks = [{ kind: "story", story: "meeting", pid: ref.pid, layout: "lead",
                   title: m.title || "", date: m.date || "", body: m.body || "",
                   town: m.town || "", thumb: m.thumb || "" },
+                { kind: "chart", chart: "numbers", pid: ref.pid, title: mtitle },
+                ...((m.moments || []).length ? [{ kind: "chart", chart: "shape", pid: ref.pid, title: mtitle }] : []),
+                ...top.map(mo => ({ kind: "quote", pid: ref.pid, t: mo.t, text: mo.quote || "", title: mtitle })),
+                ...((m.votes || []).length ? [{ kind: "chart", chart: "votes", pid: ref.pid, title: mtitle }] : []),
                 { kind: "chart", chart: "framing", pid: ref.pid, title: m.title || "" },
+                { kind: "reading", pid: ref.pid, title: mtitle },
+                ...((m.documents || []).slice(0, 3).filter(d => d && d.doc_id)
+                    .map(d => ({ kind: "doc", pid: ref.pid, doc: d.doc_id, title: d.title || "", dkind: d.kind || "" }))),
                 { kind: "note", text: "" }];
     } else return false;
     // the fetch awaited — re-read, and never overwrite silently. A draft
@@ -3403,9 +3625,9 @@
      the receipt carries the page a reader can recount it on. */
   function chartRecordURL(b) {
     return `${location.origin}${BASE}` + (
-      b.chart === "votes" ? "/officials"
-      : b.chart === "reach" ? `/i/${b.slug}`
-      : b.chart === "framing" && b.pid ? `/m/${b.pid}`
+      b.slug ? `/i/${b.slug}`
+      : b.pid ? `/m/${b.pid}`
+      : b.chart === "votes" ? "/officials"
       : "/analytics");
   }
   function paperJSON(p) {
@@ -3443,6 +3665,10 @@
               ...(b.pid ? { pid: b.pid } : {}),
               computed: "in the reader's browser, from the record's own planes",
               url: chartRecordURL(b) }
+        : b.kind === "reading"
+          ? { kind: "reading", ...(b.pid ? { pid: b.pid } : { slug: b.slug }),
+              computed: "in the reader's browser, from the analyzer's pressed read — no model",
+              url: `${location.origin}${BASE}/${b.pid ? "m/" + b.pid : "i/" + b.slug}` }
         : b.story === "issue"
           ? { kind: "story", story: "issue", slug: b.slug, name: b.name || "",
               url: `${location.origin}${BASE}/i/${b.slug}` }
@@ -3708,14 +3934,15 @@
     for (const b of doc.blocks) {
       if (b.kind === "story" && b.story === "meeting") mpids.add(b.pid);
       else if (b.kind === "story" && b.story === "issue") islugs.add(b.slug);
-      else if (b.kind === "chart" && b.chart === "framing" && b.pid) mpids.add(b.pid);
-      else if (b.kind === "chart" && b.chart === "reach") islugs.add(b.slug);
+      else if (b.kind === "chart" && b.pid) mpids.add(b.pid);      // framing · numbers · shape · votes, of one meeting
+      else if (b.kind === "chart" && b.slug) islugs.add(b.slug);   // reach · numbers · ledger, of one issue
       else if (b.kind === "quote" || b.kind === "doc") mpids.add(b.pid);
       else if (b.kind === "digest") islugs.add(b.slug);
+      else if (b.kind === "reading") { if (b.pid) mpids.add(b.pid); else islugs.add(b.slug); }
     }
     for (const b of doc.blocks)
       if (b.kind === "reel") b.clips.forEach(c => mpids.add(c.pid));
-    const wantVotes = doc.blocks.some(b => b.kind === "chart" && b.chart === "votes");
+    const wantVotes = doc.blocks.some(b => b.kind === "chart" && b.chart === "votes" && !b.pid);
     const wantAnalytics = doc.blocks.some(b => b.kind === "chart"
       && (b.chart === "topics" || (b.chart === "framing" && !b.pid)));
     // the tape's own words, once per meeting: a reel's cuts that are not
@@ -3733,6 +3960,7 @@
     ]);
     if (gen !== PAPER_GEN) return;     // a newer render superseded this one
     const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
+    PAPER_PLANES = { mby, iby };       // the writing desk reads what this render fetched
     // every fetched result is kept — null (the tape didn't load), [] (a tape
     // with no lines) and lines are three facts; only a pid never fetched
     // (past the cap) stays undefined
@@ -3969,6 +4197,7 @@
         ${paras}</section>`;
     }
     if (b.kind === "chart") return renderChartBlock(b, mby, iby, tried, aux);
+    if (b.kind === "reading") return renderReading(b, mby, iby, tried);
     if (b.kind === "quote") return renderQuote(b, mby, { ...aux, tried });
     if (b.kind === "doc") return renderDoc(b, mby, tried);
     if (b.kind === "digest") return renderDigest(b, iby, tried);
@@ -4069,7 +4298,11 @@
     `<p class="pb-gone">${html}</p>`, "", "");
   const chartDay = d => d ? esc(String(d).slice(5)) : "—";
   function renderChartBlock(b, mby, iby, tried, aux) {
+    if (b.chart === "votes" && b.pid) return chartVotesMeeting(b, mby, tried);
     if (b.chart === "votes") return chartVotes(aux.votes);
+    if (b.chart === "numbers") return chartNumbers(b, mby, iby, tried);
+    if (b.chart === "shape") return chartShape(b, mby, tried);
+    if (b.chart === "ledger") return chartLedger(b, iby, tried);
     if (b.chart === "topics") return chartTopics(aux.analytics);
     if (b.chart === "framing" && !b.pid) return chartFramingRecord(aux.analytics);
     if (b.chart === "framing") return chartFramingMeeting(b, mby, tried);
@@ -4231,6 +4464,187 @@
        <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>
        holds every appearance in place`);
   }
+  /* ---- the two paths' pictures (specs/24) --------------------------------
+     Every one computed HERE from the record's own pressed planes — a paper
+     carries which picture and whose, never a number. The paper palette only:
+     deep green is measurement, slate is label; a receipt under every mark
+     and a table twin where the picture is positional. */
+  const nOf = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const numbersStrip = cells => `<div class="pb-nums">` + cells.map(([n, label, href]) =>
+    `<a class="pb-num" href="${href}"><b>${n}</b><span>${esc(label)}</span></a>`).join("") + `</div>`;
+  /* the meeting in numbers / the issue in numbers: a strip of counted facts,
+     every cell a receipt into the page that holds the count */
+  function chartNumbers(b, mby, iby, tried) {
+    if (b.pid) {
+      const m = mby[b.pid];
+      if (!m) return tried.m.has(b.pid) ? paperGone(`a meeting (${b.pid})`) : paperBudget("a meeting’s numbers");
+      const an = m.analysis || {}, href = `${BASE}/m/${esc(b.pid)}`;
+      const cells = [
+        [Math.round((+m.duration || 0) / 60), "minutes", href],
+        [(m.votes || []).length, "roll calls", href],
+        [(an.decisions || []).length, "decisions", href],
+        [(an.questions || []).length, "questions asked", href],
+        [(an.tension || []).length, "moments of pushback", href],
+        [(m.documents || []).length, "filings", href],
+      ];
+      return chartShell(`the meeting in numbers — ${esc(m.title || b.pid)}`, "",
+        numbersStrip(cells), "",
+        `counted from the meeting’s own pressed plane when this paper rendered — <a href="${href}">the meeting</a> holds every one in place`);
+    }
+    const it = iby[b.slug];
+    if (!it) return tried.i.has(b.slug) ? paperGone(`an issue (${b.slug})`) : paperBudget("an issue’s numbers");
+    const tl = (it.timeline || []).filter(n => n && typeof n === "object"), href = `${BASE}/i/${esc(b.slug)}`;
+    const moments = tl.reduce((s, n) => s + ((n.beads || []).length), 0);
+    const milestones = tl.reduce((s, n) => s + ((n.milestones || []).length), 0);
+    const yr = d => d ? esc(String(d).slice(0, 4)) : "—";
+    const cells = [
+      [tl.length || (+it.n_meetings || 0), "meetings", href],
+      [moments, "moments", href],
+      [(it.ledger || []).length, "roll calls", href],
+      [milestones, "milestones", href],
+      [yr(it.first_seen), "first seen", href],
+      [yr(it.last_seen), "last seen", href],
+    ];
+    return chartShell(`the issue in numbers — ${esc(it.name || b.slug)}`, "",
+      numbersStrip(cells), "",
+      `counted from the issue’s own long view when this paper rendered — <a href="${href}">the issue</a> holds every appearance in place`);
+  }
+  /* the shape of a meeting: the tape as one strip, its moments marked where
+     they fell — a roll call as a bar, a decision as a triangle, pushback as
+     a diamond, a question as a dot — every mark a deep link into the tape,
+     and a table twin that reads the same moments in order */
+  const SHAPE_KINDS = { vote: "roll call", decision: "decision", tension: "pushback", question: "question" };
+  function chartShape(b, mby, tried) {
+    const m = mby[b.pid];
+    if (!m) return tried.m.has(b.pid) ? paperGone(`a meeting (${b.pid})`) : paperBudget("the shape of a meeting");
+    const kicker = `the shape of the meeting — ${esc(m.title || b.pid)}`;
+    const mos = (m.moments || []).filter(mo => mo && typeof mo.t === "number" && mo.t >= 0)
+      .slice().sort((a, c) => a.t - c.t);
+    const src = `from the meeting’s own moments plane — scored, not chosen; every mark opens the tape where it fell. <a href="${BASE}/m/${esc(b.pid)}">the meeting</a> holds them all`;
+    if (!mos.length)
+      return chartShell(kicker, "", `<p class="hint">The analyzer scored no moments on this tape — the meeting reads whole on its page.</p>`, "", src);
+    const dur = Math.max(+m.duration || 0, ...mos.map(mo => +mo.end || mo.t), 1);
+    const W = 720, H = 92, padL = 8, padR = 8, axisY = 60, plotW = W - padL - padR;
+    const x = t => r1(padL + plotW * Math.max(0, Math.min(1, t / dur)));
+    let marks = "";
+    const counts = {};
+    mos.forEach(mo => {
+      const kind = SHAPE_KINDS[mo.kind] ? mo.kind : "question", cx = x(mo.t);
+      counts[kind] = (counts[kind] || 0) + 1;
+      const tip = `${hms(mo.t)} · ${SHAPE_KINDS[kind]} — ${String(mo.quote || "").slice(0, 120)}`;
+      const glyph = kind === "vote"
+        ? `<rect x="${r1(cx - 4)}" y="18" width="8" height="${axisY - 18}" rx="1" fill="#052e16" fill-opacity=".85"/>`
+        : kind === "decision"
+        ? `<path d="M${cx} 26 l7 14 h-14 z" fill="#052e16" fill-opacity=".85"/>`
+        : kind === "tension"
+        ? `<path d="M${cx} 30 l6 8 -6 8 -6 -8 z" fill="#ffffff" stroke="#052e16" stroke-width="2"/>`
+        : `<circle cx="${cx}" cy="${axisY - 10}" r="3.5" fill="#052e16" fill-opacity=".55"/>`;
+      marks += `<a href="${BASE}/m/${esc(b.pid)}#t${Math.floor(mo.t)}" aria-label="${esc(tip.slice(0, 140))}">${glyph}<title>${esc(tip)}</title></a>`;
+    });
+    let ticks = "";
+    for (let h = 0; h * 3600 <= dur; h++) {
+      const cx = x(h * 3600);
+      ticks += `<line x1="${cx}" y1="${axisY}" x2="${cx}" y2="${axisY + 6}" stroke="#475569"/>`
+        + `<text x="${cx}" y="${axisY + 20}" text-anchor="${h === 0 ? "start" : "middle"}" font-size="10" fill="#475569">${h}h</text>`;
+    }
+    const legend = Object.keys(SHAPE_KINDS).filter(k => counts[k])
+      .map(k => nOf(counts[k], SHAPE_KINDS[k], SHAPE_KINDS[k] + "s")).join(" · ");
+    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="group" `
+      + `aria-label="the shape of ${esc(m.title || b.pid)} — ${mos.length} moments on a ${hms(dur)} tape; the table below reads them in order">`
+      + `<line x1="${padL}" y1="${axisY + 0.5}" x2="${W - padR}" y2="${axisY + 0.5}" stroke="#0f172a" stroke-width="1"/>`
+      + ticks + marks + `</svg>`;
+    const twin = `<thead><tr><th>time</th><th>kind</th><th>the moment</th></tr></thead><tbody>`
+      + mos.map(mo => `<tr><td><a href="${BASE}/m/${esc(b.pid)}#t${Math.floor(mo.t)}">${hms(mo.t)}</a></td>
+          <td>${esc(SHAPE_KINDS[mo.kind] || "question")}</td><td>${esc(String(mo.quote || "").slice(0, 160))}</td></tr>`).join("")
+      + `</tbody>`;
+    return chartShell(kicker,
+      `${hms(dur)} of tape · ${legend} — a bar is a roll call, a triangle a decision, a diamond pushback, a dot a question`,
+      `<div class="pb-chartwrap">${svg}</div>`, twin, src);
+  }
+  /* a roll call as a row: the mark (filled passes, hollow fails, half-tone
+     anything else — the word says which), the time or the day, the motion,
+     the tally, the outcome, and the roll beneath */
+  function voteRows(votes, when) {
+    return votes.map(v => {
+      const mark = v.outcome === "passes" ? "pass" : v.outcome === "fails" ? "fail" : "other";
+      const roll = (v.roll || []).map(r =>
+        `<span class="pb-roll"><span class="pb-rollname">${esc(r.name || "")}</span> ${esc(r.vote || "")}</span>`).join("");
+      return `<div class="pb-vote pb-vote-${mark}"><a class="pb-votehead" href="${BASE}/m/${esc(v.pid)}#t${Math.floor(+v.t || 0)}">
+          <span class="pb-votemark" aria-hidden="true"></span><span class="ts">${esc(when(v))}</span>
+          <span class="pb-motion">${esc(String(v.motion || "(motion)").slice(0, 140))}</span>
+          <span class="pb-tally">${esc(v.tally || "")}</span><span class="pb-outcome">${esc(v.outcome || "")}</span></a>
+          ${roll ? `<div class="pb-rolls">${roll}</div>` : ""}</div>`;
+    }).join("");
+  }
+  /* one meeting's roll calls, read from its own plane */
+  function chartVotesMeeting(b, mby, tried) {
+    const m = mby[b.pid];
+    if (!m) return tried.m.has(b.pid) ? paperGone(`a meeting (${b.pid})`) : paperBudget("a meeting’s roll calls");
+    const kicker = `the roll calls — ${esc(m.title || b.pid)}`;
+    const votes = (m.votes || []).filter(v => v && typeof v.t === "number").map(v => ({ ...v, pid: b.pid }));
+    if (!votes.length)
+      return chartShell(kicker, "", `<p class="hint">No roll call was read from this tape — the body may have voted by voice, or not at all.</p>`, "",
+        `from the meeting’s own vote ledger — <a href="${BASE}/m/${esc(b.pid)}">the meeting</a>`);
+    return chartShell(kicker,
+      `${nOf(votes.length, "roll call", "roll calls")} read from the tape — a filled mark passes, a hollow one fails, the word says which`,
+      `<div class="pb-votes">${voteRows(votes, v => hms(v.t))}</div>`, "",
+      `read from the transcript; a name may be misheard — verify against the official minutes. <a href="${BASE}/m/${esc(b.pid)}">the meeting</a> holds the ledger in place`);
+  }
+  /* an issue's ledger: every roll call along its way, across meetings */
+  function chartLedger(b, iby, tried) {
+    const it = iby[b.slug];
+    if (!it) return tried.i.has(b.slug) ? paperGone(`an issue (${b.slug})`) : paperBudget("an issue’s ledger");
+    const kicker = `every roll call along the way — ${esc(it.name || b.slug)}`;
+    const led = (it.ledger || []).filter(v => v && v.pid);
+    if (!led.length)
+      return chartShell(kicker, "", `<p class="hint">No roll call on this issue has been read from a tape yet — its appearances are talk, so far.</p>`, "",
+        `from the issue’s own ledger — <a href="${BASE}/i/${esc(b.slug)}">the issue</a>`);
+    return chartShell(kicker,
+      `${nOf(led.length, "roll call", "roll calls")} across ${nOf(new Set(led.map(v => v.pid)).size, "meeting", "meetings")}, oldest first`,
+      `<div class="pb-votes">${voteRows(led, v => v.date || "undated")}</div>`, "",
+      `from the issue’s own ledger when this paper rendered — <a href="${BASE}/i/${esc(b.slug)}">the issue</a> holds every vote in place`);
+  }
+  /* the record's reading (specs/24): what was decided, what was asked, who
+     and what was named, where the pushback was — for a meeting; the
+     milestones in order, for an issue. Extractive, receipts throughout, no
+     model: the analyzer's read, pressed, said as a reading. */
+  function renderReading(b, mby, iby, tried) {
+    const part = (kicker, rows) => rows ? `<div class="pb-rdpart"><span class="kicker">${kicker}</span>${rows}</div>` : "";
+    const row = (href, t, tag, text) => `<a class="pb-rdrow" href="${href}"><span class="ts">${hms(t)}</span>`
+      + (tag ? `<span class="pb-rdtag">${esc(tag)}</span>` : "") + ` ${esc(String(text || "").slice(0, 160))}</a>`;
+    if (b.pid) {
+      const m = mby[b.pid];
+      if (!m) return tried.m.has(b.pid) ? paperGone(`a meeting (${b.pid})`) : paperBudget("the record’s reading of a meeting");
+      const an = m.analysis || {}, at = t => `${BASE}/m/${esc(b.pid)}#t${Math.floor(+t || 0)}`;
+      const ents = an.entities || {};
+      const names = ["people", "organizations", "places", "money"].map(k => ({ k,
+        v: (Array.isArray(ents[k]) ? ents[k] : []).slice(0, 6)
+          .map(e => typeof e === "string" ? e : (e && (e.name || e.text)) || "").filter(Boolean) }))
+        .filter(x => x.v.length);
+      const body = part("what was decided", (an.decisions || []).slice(0, 8).map(d => row(at(d.t), d.t, d.outcome, d.text)).join(""))
+        + part("what was asked", (an.questions || []).slice(0, 8).map(q => row(at(q.t), q.t, q.type, q.text)).join(""))
+        + part("where the pushback was", (an.tension || []).slice(0, 5).map(d => row(at(d.t), d.t, "", d.text)).join(""))
+        + part("who and what was named", names.map(x =>
+            `<p class="pb-rdnames"><span class="pb-rdtag">${esc(x.k)}</span> ${x.v.map(esc).join(" · ")}</p>`).join(""));
+      const head = `<div class="sectionhead"><span class="kicker">the record’s reading — ${esc(m.title || b.pid)}</span></div>`;
+      if (!body) return `<section class="pb-reading">${head}<p class="hint">The analyzer read nothing it could name on this tape — the meeting reads whole on its page.</p></section>`;
+      return `<section class="pb-reading">${head}${body}<p class="pb-chartsrc">counted and quoted from the transcript by open rules — no model; every line opens the tape where it was said. <a href="${BASE}/m/${esc(b.pid)}">the meeting</a> holds the whole read</p></section>`;
+    }
+    const it = iby[b.slug];
+    if (!it) return tried.i.has(b.slug) ? paperGone(`an issue (${b.slug})`) : paperBudget("the record’s reading of an issue");
+    const tl = (it.timeline || []).filter(n => n && typeof n === "object" && n.pid);
+    const rows = tl.map(n => {
+      const ms = (n.milestones || []).slice(0, 4), bead = (n.beads || [])[0];
+      const inner = ms.length
+        ? ms.map(mm => row(`${BASE}/m/${esc(n.pid)}#t${Math.floor(+mm.t || 0)}`, mm.t, mm.kind || "milestone",
+            String(mm.text || "").slice(0, 150) + (mm.outcome ? ` — ${mm.outcome}` : ""))).join("")
+        : bead ? row(`${BASE}/m/${esc(n.pid)}#t${Math.floor(+bead.t || 0)}`, bead.t, "", bead.text) : "";
+      return `<div class="pb-rdnode"><a class="pb-rdhead" href="${BASE}/m/${esc(n.pid)}"><b>${esc(n.date || "undated")}</b> · ${esc(n.body || n.title || n.pid)} · ${nOf(+n.n || 0, "moment", "moments")}</a>${inner}</div>`;
+    }).join("");
+    const head = `<div class="sectionhead"><span class="kicker">the record’s reading — ${esc(it.name || b.slug)}, meeting by meeting</span></div>`;
+    if (!rows) return `<section class="pb-reading">${head}<p class="hint">The record hasn’t seen this issue surface in a meeting yet.</p></section>`;
+    return `<section class="pb-reading">${head}${rows}<p class="pb-chartsrc">the milestones the analyzer found at each appearance, by open rules — no model; every line opens the tape. <a href="${BASE}/i/${esc(b.slug)}">the issue</a> holds the long view</p></section>`;
+  }
   /* magnitude bars in HTML — the heatmap's precedent: real text labels (AA
      at any width), an inline width that is the measurement, deep green the
      only hue. Used by both framing charts and topics. */
@@ -4372,12 +4786,74 @@
      its four rows, not their words — the paper prints these instead, kept
      in step with every keystroke and re-read on beforeprint */
   const notePrint = text => String(text || "").trim().split(/\n+/).map(t => `<p>${esc(t)}</p>`).join("");
+  /* the writing desk (specs/24 §2.3): three prompts rotate in the note's
+     placeholder, and a drawer of facts at hand — the numbers, the loudest
+     moments, the roll calls, an issue's span and its latest word — drawn
+     from the planes this paper's own blocks already fetched. A press cites
+     a fact at the caret as a receipt; the sentence around it stays the
+     editor's. Nothing is fetched for the desk and nothing leaves the page. */
+  const DESK_PROMPTS = ["what was decided, and who moved it?",
+                        "what changed since the last time?",
+                        "what should a neighbor watch for next?"];
   const edNote = (b, i) => `<div class="pb-note cz-ednotewrap">
       <span class="kicker">the editor’s note</span>
       <textarea class="cz-ednote" data-i="${i}" rows="4" maxlength="${PAPER_NOTE_MAX}"
-        placeholder="your own words — why this matters"
+        placeholder="${esc(DESK_PROMPTS[i % DESK_PROMPTS.length])} — your own words"
         aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea>
-      <div class="cz-ednote-print" aria-hidden="true">${notePrint(b.text)}</div></div>`;
+      <div class="cz-ednote-print" aria-hidden="true">${notePrint(b.text)}</div>
+      <details class="cz-desk"><summary>facts at hand — receipts to cite</summary>
+        <div class="cz-deskbody"></div></details></div>`;
+  let PAPER_PLANES = { mby: {}, iby: {} };   // the last render's planes; the desk reads them
+  function deskFacts() {
+    const facts = [], { mby, iby } = PAPER_PLANES;
+    const words = s => cut(String(s || "").replace(/\s+/g, " ").trim(), 140);
+    for (const pid of Object.keys(mby || {})) {
+      const m = mby[pid]; if (!m) continue;
+      const an = m.analysis || {}, who = m.title || pid, when = m.date ? `, ${m.date}` : "";
+      facts.push({ kind: "the numbers", text: `${who}${m.date ? ` (${m.date})` : ""}: `
+        + `${Math.round((+m.duration || 0) / 60)} minutes · ${(m.votes || []).length} roll calls · `
+        + `${(an.decisions || []).length} decisions · ${(an.questions || []).length} questions asked · `
+        + `${(an.tension || []).length} moments of pushback` });
+      for (const mo of (m.moments || []).filter(mo => mo && typeof mo.t === "number")
+          .slice().sort((a, c) => (+c.score || 0) - (+a.score || 0)).slice(0, 4))
+        facts.push({ kind: SHAPE_KINDS[mo.kind] || mo.kind || "moment",
+                     text: `[${hms(mo.t)}] “${words(mo.quote)}” — ${who}${when}` });
+      for (const v of (m.votes || []).slice(0, 3))
+        facts.push({ kind: "roll call", text: `[${hms(v.t)}] ${words(v.motion)} — ${v.outcome || ""}`
+          + `${v.tally ? ` ${v.tally}` : ""} (${who}${when})` });
+    }
+    for (const slug of Object.keys(iby || {})) {
+      const it = iby[slug]; if (!it) continue;
+      const tl = (it.timeline || []).filter(n => n && n.pid), last = tl[tl.length - 1];
+      const bead = last && (last.beads || []).find(x => x && typeof x.t === "number");
+      facts.push({ kind: "the long view", text: `${it.name || slug}: ${nOf(tl.length || (+it.n_meetings || 0), "meeting", "meetings")}`
+        + (it.first_seen ? `, ${it.first_seen} to ${it.last_seen || "now"}` : "")
+        + `, ${nOf((it.ledger || []).length, "roll call", "roll calls")} along the way` });
+      if (bead) facts.push({ kind: "latest", text: `[${hms(bead.t)}] “${words(bead.text)}” — `
+        + `${last.body || last.title || last.pid}${last.date ? `, ${last.date}` : ""}` });
+    }
+    return facts.slice(0, 24);
+  }
+  function fillDesk(d) {
+    const body = $(".cz-deskbody", d); if (!body || body.dataset.filled) return;
+    const facts = deskFacts();
+    body.dataset.filled = "1";
+    body.innerHTML = facts.length
+      ? `<p class="cz-hint">press a fact to cite it at the caret — the words stay the record’s, the sentence around them yours</p>`
+        + facts.map(f => `<button type="button" class="cz-fact" data-czfact="${esc(f.text)}"><span class="rt-kind">${esc(f.kind)}</span> ${esc(cut(f.text, 150))}</button>`).join("")
+      : `<p class="cz-hint">add a meeting or an issue to your paper and its facts land here</p>`;
+  }
+  function citeFact(btn) {
+    const wrap = btn.closest(".cz-ednotewrap"), ta = wrap && $(".cz-ednote", wrap);
+    if (!ta) return;
+    const text = btn.dataset.czfact || "", s = ta.selectionStart, e = ta.selectionEnd;
+    const before = ta.value.slice(0, s), after = ta.value.slice(e);
+    const ins = (before && !/\s$/.test(before) ? " " : "") + text + (after && !/^\s/.test(after) ? " " : "");
+    ta.value = cut(before + ins + after, PAPER_NOTE_MAX);
+    const at = Math.min(ta.value.length, s + ins.length);
+    ta.focus(); ta.setSelectionRange(at, at);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));   // the save path hears it
+  }
   function edRow(html, b, i, n, pair) {
     const act = (a, glyph, label, dis) =>
       `<button type="button" class="cz-edact" data-czed="${a}" data-i="${i}"
@@ -4507,7 +4983,15 @@
       const ti = $(".cz-edtitle", el), tw = $(".cz-edtitle-print", el);
       if (ti && tw) tw.textContent = printTitle(cut(ti.value, PAPER_TITLE_MAX));
     });
+    // the writing desk fills on first open, from the planes the last render
+    // fetched; a press on a fact cites it at the note's caret
+    el.addEventListener("toggle", e => {
+      const d = e.target;
+      if (d && d.classList && d.classList.contains("cz-desk") && d.open) fillDesk(d);
+    }, true);
     el.addEventListener("click", e => {
+      const f = e.target.closest && e.target.closest("[data-czfact]");
+      if (f && el.contains(f)) { citeFact(f); return; }
       const b = e.target.closest && e.target.closest("[data-czed]");
       if (!b || !el.contains(b)) return;
       const act = b.dataset.czed, i = +b.dataset.i;
@@ -4526,6 +5010,11 @@
         else if (kind === "i") addStoryRef({ story: "issue", slug: ref }, at);
         else if (kind === "cm") addChartToPaper("framing", ref, at);
         else if (kind === "ci") addChartToPaper("reach", ref, at);
+        else if (kind === "cn") addChartToPaper("numbers", ref, at);
+        else if (kind === "cs") addChartToPaper("shape", ref, at);
+        else if (kind === "cl") addChartToPaper("ledger", ref, at);
+        else if (kind === "cv") addChartToPaper("votes", ref, at);
+        else if (kind === "a") addReadingToPaper(ref, at);
         else if (kind === "chart") addChartToPaper(ref, "", at);
         else if (kind === "note") addNoteToPaper(at);
         else if (kind === "reel") addReelToPaper(at);
@@ -4846,6 +5335,13 @@
           ? `<span class="cz-edhit-in">✓ in your paper</span>`
           : `<button type="button" class="btn" data-czed="hit" data-kind="${h.kind}" data-ref="${esc(h.ref)}"
                aria-label="add “${esc(h.title)}” as a story">＋ story</button>`}
+          <button type="button" class="btn" data-czed="hit" data-kind="cn" data-ref="${h.kind === "m" ? "m:" : "i:"}${esc(h.ref)}"
+            aria-label="“${esc(h.title)}” in numbers — a strip of counted facts">▤ numbers</button>
+          ${h.kind === "m"
+            ? `<button type="button" class="btn" data-czed="hit" data-kind="cs" data-ref="${esc(h.ref)}" aria-label="the shape of “${esc(h.title)}” — its moments on the tape">▤ shape</button>`
+            : `<button type="button" class="btn" data-czed="hit" data-kind="cl" data-ref="${esc(h.ref)}" aria-label="every roll call along the way of “${esc(h.title)}”">▤ ledger</button>`}
+          <button type="button" class="btn" data-czed="hit" data-kind="a" data-ref="${h.kind === "m" ? "m:" : "i:"}${esc(h.ref)}"
+            aria-label="the record’s reading of “${esc(h.title)}”">✎ the reading</button>
           <button type="button" class="btn" data-czed="hit" data-kind="${h.kind === "m" ? "cm" : "ci"}" data-ref="${esc(h.ref)}"
             aria-label="add a ${h.kind === "m" ? "framing" : "reach"} chart for “${esc(h.title)}”">▤ ${h.kind === "m" ? "framing" : "reach"}</button>
           ${h.kind === "m"

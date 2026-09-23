@@ -224,6 +224,25 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
   border-top:3px solid var(--accent)}
 .briefscol{border-left:var(--border-w) solid var(--border-hairline);padding-left:var(--space-5)}
 .lead .kicker{display:block;margin-bottom:var(--space-3)}
+/* the lead, as a story (specs/24): words first, the still at card size beside them,
+   the meeting in numbers under the lede, three pull-moments, two doors */
+.lead-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:var(--space-5);align-items:start}
+.lead-words{min-width:0}
+.lead-still{display:block}
+.lead-still img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;
+  border:var(--border-w) solid var(--border-hairline)}
+.lead-tape{display:block;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);margin-top:4px}
+.lead-still:hover .lead-tape{color:var(--accent)}
+.decksrc{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);margin:0 0 var(--space-3)}
+.lead-nums{display:flex;flex-wrap:wrap;border-top:var(--border-w) solid var(--border-hairline);
+  border-bottom:var(--border-w) solid var(--border-hairline);margin:var(--space-3) 0 0}
+.ln{flex:1 1 84px;padding:var(--space-2) var(--space-2) var(--space-2) 0;margin-right:var(--space-3)}
+.ln b{display:block;font-family:var(--font-mono);font-size:var(--text-lg);font-weight:var(--weight-black);
+  color:var(--accent);line-height:1.1}
+.ln span{font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--text-secondary)}
+.ln:hover b{text-decoration:underline}
+.lead-acts{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-4)}
 .lead-media{display:block;margin-bottom:var(--space-3)}
 .lead-media img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;
   border:var(--border-w) solid var(--border-hairline);background:var(--surface-inverse)}
@@ -274,24 +293,121 @@ h1{font-family:var(--font-mono);font-weight:var(--weight-bold);
    the byte-clean guard sweeps every stub). Real links throughout, so a
    reader with JavaScript off follows them and the editor they land on says
    honestly what it needs. The featured papers (pf-) ride along as cards. */
-.yp-door{margin-top:var(--space-7);padding:var(--space-5);
-  border-top:3px solid var(--accent);
-  border-bottom:var(--border-w) solid var(--border-hairline);
-  background:var(--tint-1)}
-.yp-kick{display:block;margin-bottom:var(--space-2)}
-.yp-hl{font-family:var(--font-mono);font-weight:var(--weight-black);font-size:26px;
-  line-height:1.15;letter-spacing:-.015em;max-width:26ch;margin:0 0 var(--space-3);
+/* ===== the front page's two stories (specs/24 §2.4) — told by the press ===== */
+.stab{display:flex;margin-top:var(--space-6);border:var(--border-w) solid var(--text-primary)}
+.stab-a{flex:1;display:flex;flex-direction:column;gap:2px;padding:var(--space-3) var(--space-4);
+  border-right:var(--border-w) solid var(--text-primary);color:var(--text-secondary);min-width:0}
+.stab-a:last-child{border-right:0}
+.stab-a b{font-family:var(--font-mono);font-size:var(--text-lg);font-weight:var(--weight-black);color:var(--text-primary)}
+.stab-a span{font-family:var(--font-mono);font-size:var(--text-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stab-a[aria-current="true"]{background:var(--text-primary)}
+.stab-a[aria-current="true"] b,.stab-a[aria-current="true"] span{color:var(--text-inverse)}
+.stab-a:hover:not([aria-current="true"]) b{color:var(--accent)}
+.fp-story{margin-top:var(--space-5);padding-top:var(--space-4);border-top:var(--border-w-strong) solid var(--text-primary)}
+.fp-story>.kicker{display:block;margin-bottom:var(--space-2)}
+.fp-hl{font-family:var(--font-mono);font-weight:var(--weight-black);font-size:30px;line-height:1.15;
+  letter-spacing:-.01em;margin-bottom:var(--space-3)}
+.fp-lede{font-size:var(--text-lg);line-height:1.5;max-width:72ch;margin:0 0 var(--space-2)}
+.fp-lede a,.fp-told a,.fp-say a{color:var(--text-primary);text-decoration:underline;text-underline-offset:2px;
+  text-decoration-color:var(--border-strong)}
+.fp-lede a:hover,.fp-told a:hover,.fp-say a:hover{color:var(--accent);text-decoration-color:var(--accent)}
+.fp-told{font-size:var(--text-md);line-height:var(--leading-body);max-width:72ch;margin:var(--space-2) 0}
+.fp-part{margin-top:var(--space-6)}
+.fp-say{font-size:var(--text-sm);color:var(--text-secondary);max-width:72ch;margin-top:var(--space-2);
+  line-height:var(--leading-body)}
+.fp-chartwrap{overflow-x:auto;padding-bottom:4px}
+.fp-chartwrap svg{display:block;max-width:100%;height:auto}
+.fp-cloudwrap svg{font-family:var(--font-mono);font-weight:var(--weight-bold)}
+.fp-cloudwrap a:hover text{fill-opacity:1;text-decoration:underline}
+.fp-twinwrap{overflow-x:auto}
+.fp-legend{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);margin-bottom:var(--space-2)}
+.fp-sub{margin-top:var(--space-4)}
+.fp-right{margin-left:auto}
+.fp-close{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-6);
+  padding-top:var(--space-4);border-top:var(--border-w) solid var(--border-hairline)}
+.fp-or{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary)}
+.fp-named{font-size:var(--text-sm);margin:4px 0}
+.fp-multiples{display:flex;flex-direction:column;gap:6px}
+.fp-mrow{display:grid;grid-template-columns:200px 1fr 170px;align-items:end;gap:var(--space-3)}
+.fp-mname{font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+a.fp-mname:hover{color:var(--accent)}
+.fp-mcells{display:flex;align-items:flex-end;gap:3px;height:30px;border-bottom:var(--border-w) solid var(--border-hairline)}
+.fp-mcell{flex:1;display:flex;align-items:flex-end;min-width:8px;height:100%}
+.fp-mcell i{display:block;width:100%;background:var(--accent);opacity:.85;border-radius:1px 1px 0 0}
+span.fp-mcell i{opacity:.18}
+a.fp-mcell:hover i{opacity:1}
+.fp-mn{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);white-space:nowrap}
+.fp-mrow-labels .fp-mcells{height:auto;border:0}
+.fp-mlabel{flex:1;font-family:var(--font-mono);font-size:9px;color:var(--text-secondary);text-align:center;min-width:8px}
+.fp-heat{display:flex;flex-direction:column;gap:3px;overflow-x:auto}
+.fp-hrow{display:grid;grid-template-columns:110px 1fr;gap:var(--space-2);align-items:center}
+.fp-hlens{font-family:var(--font-mono);font-size:var(--text-xs);text-transform:capitalize;color:var(--text-secondary)}
+.fp-hcells{display:flex;gap:3px}
+.fp-hcell{flex:1;min-width:14px;height:18px;display:block;border-radius:2px;
+  background:rgba(5,46,22,var(--o,.1))}     /* deep green, at the share's depth */
+.fp-hcell:hover{outline:2px solid var(--accent);outline-offset:-2px}
+.fp-hcol{flex:1;min-width:14px;font-family:var(--font-mono);font-size:9px;color:var(--text-secondary);text-align:center}
+.fp-hcol:hover{color:var(--accent)}
+.fp-sparks{display:flex;flex-direction:column;gap:6px}
+.fp-spark{display:grid;grid-template-columns:150px 1fr 90px;gap:var(--space-3);align-items:end}
+.fp-sterm{font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium)}
+.fp-sterm:hover{color:var(--accent)}
+.fp-sbars{display:flex;align-items:flex-end;gap:2px;height:24px;border-bottom:var(--border-w) solid var(--border-hairline)}
+.fp-sbar{flex:1;display:flex;align-items:flex-end;height:100%}
+.fp-sbar i{display:block;width:100%;background:var(--accent);opacity:.8}
+.fp-sbar:hover i{opacity:1}
+.fp-sn{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);text-align:right}
+a.fp-topic:hover,a.lenslabel:hover{color:var(--accent)}
+.fp-topics .lensrow{grid-template-columns:200px 1fr 34px 90px}
+/* the story toggle hides the other story only with the script on */
+html.js .fp-story[hidden]{display:none}
+
+/* the mode bar (specs/24) — says plainly whether you are reading or editing.
+   Script-added under the section line in preview and studio modes; paper
+   mode carries no chrome; the studio's own accents, and only there */
+.cz-modebar{display:none}
+html.cz-m-preview .cz-modebar,html.cz-m-studio .cz-modebar{display:flex;flex-wrap:wrap;align-items:center;
+  gap:var(--space-2) var(--space-4);max-width:1180px;margin:var(--space-2) auto 0;padding:7px var(--space-5);
+  font-family:var(--font-mono);font-size:var(--text-xs);border-top:var(--border-w) solid var(--border-hairline);
+  border-bottom:var(--border-w) solid var(--border-hairline)}
+.cz-modebar-state{font-weight:var(--weight-bold);text-transform:uppercase;letter-spacing:var(--tracking-label);
   color:var(--text-primary)}
-.yp-copy{max-width:64ch;font-size:var(--text-md);line-height:var(--leading-body);
-  margin:0 0 var(--space-2);color:var(--text-primary)}
-.yp-acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);
-  margin-top:var(--space-4)}
-.yp-start{font-size:var(--text-base);padding:11px 16px}
-.yp-or{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);
-  text-transform:uppercase;letter-spacing:var(--tracking-label);margin-left:var(--space-2)}
-.yp-tpl{font-size:var(--text-xs)}
-.yp-pressed{margin-top:var(--space-5)}
-.yp-pressed .kicker{display:block;margin-bottom:var(--space-3)}
+.cz-modebar-say{color:var(--text-secondary)}
+.cz-modebar-seg{display:inline-flex;border:var(--border-w) solid var(--border-strong);border-radius:var(--radius-sm);
+  overflow:hidden;margin-left:auto}
+.cz-modebar-seg button{font:var(--weight-medium) var(--text-xs)/1 var(--font-mono);padding:7px 12px;border:0;
+  background:var(--surface-card);color:var(--text-secondary);cursor:pointer}
+.cz-modebar-seg button[aria-checked="true"]{background:var(--text-primary);color:var(--text-inverse)}
+html.cz-m-studio .cz-modebar{border-top:2px solid var(--studio-accent);border-bottom-color:var(--studio-accent)}
+html.cz-m-studio .cz-modebar-state{color:var(--studio-accent-text)}
+html.cz-m-studio .cz-modebar-seg button[aria-checked="true"]{background:var(--studio-accent-text)}
+
+/* the two paths (specs/24) — the front door to the making half, baked content in
+   the paper palette: two doors side by side, each with real starts */
+.sp-paths{margin-top:var(--space-7);padding:var(--space-5);
+  border-top:var(--border-w-strong) solid var(--text-primary);
+  border-bottom:var(--border-w) solid var(--border-hairline);background:var(--surface-card)}
+.sp-kick{display:block;margin-bottom:var(--space-2)}
+.sp-hl{font-family:var(--font-mono);font-weight:var(--weight-black);font-size:26px;
+  line-height:1.15;letter-spacing:-.01em;margin-bottom:var(--space-3)}
+.sp-copy{max-width:70ch;font-size:var(--text-md);line-height:var(--leading-body);
+  color:var(--text-secondary);margin-bottom:var(--space-4)}
+.sp-two{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5)}
+.sp-path{min-width:0;padding:var(--space-4);background:var(--surface-page);
+  border:var(--border-w) solid var(--border-hairline);border-top:3px solid var(--accent)}
+.sp-num{font-family:var(--font-mono);font-size:var(--text-xs);text-transform:uppercase;
+  letter-spacing:var(--tracking-label);color:var(--accent)}
+.sp-path h3{font-family:var(--font-mono);font-size:22px;font-weight:var(--weight-black);
+  line-height:1.15;margin:4px 0 var(--space-2)}
+.sp-path p{font-size:var(--text-base);color:var(--text-secondary);line-height:var(--leading-body)}
+.sp-starts{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-3)}
+.sp-or{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary)}
+.sp-start{font-size:var(--text-xs)}
+.sp-more{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;margin-top:var(--space-4)}
+.sp-blank{font-size:var(--text-base);padding:11px 16px}
+.sp-pressed{margin-top:var(--space-5)}
+.sp-pressed .kicker{display:block;margin-bottom:var(--space-3)}
 .vt-motion{display:block;font-size:var(--text-sm);color:var(--text-primary)}
 .vt-meta{display:block;font-family:var(--font-mono);font-size:var(--text-xs);
   color:var(--text-secondary);margin-top:3px}
@@ -982,10 +1098,20 @@ table.twin a{color:var(--accent)}
 /* ============================ responsive ============================ */
 @media (max-width:720px){
   .main{padding:var(--space-4) var(--space-4) var(--space-7)}
-  .yp-door{padding:var(--space-4)}
-  .yp-hl{font-size:22px}
-  .yp-start{width:100%;text-align:center}
-  .yp-or{margin-left:0;flex:0 0 100%}
+  .sp-paths{padding:var(--space-4)}
+  .stab-a{padding:var(--space-2) var(--space-3)}
+  .stab-a b{font-size:var(--text-base)}
+  .fp-hl{font-size:24px}
+  .fp-mrow{grid-template-columns:110px 1fr 80px}
+  .fp-spark{grid-template-columns:100px 1fr 60px}
+  .fp-hrow{grid-template-columns:80px 1fr}
+  .fp-topics .lensrow{grid-template-columns:110px 1fr 34px 64px}
+  .cz-modebar-seg{margin-left:0}
+  .sp-hl{font-size:22px}
+  .sp-two{grid-template-columns:1fr}
+  .sp-blank{width:100%;text-align:center}
+  .lead-grid{grid-template-columns:1fr}
+  .lead-still{max-width:320px}
   .pb-pair{grid-template-columns:1fr}
   .masthead{padding:var(--space-3) var(--space-4) 0}
   .brand{gap:var(--space-2)}
