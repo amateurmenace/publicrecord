@@ -36,19 +36,30 @@
      retry: a second attempt would double the wait to tell them the same
      thing, and the static index is right there. */
   const API_TIMEOUT_MS = 6000;
-  let API_DOWN = false;      // one failure is enough; stop asking this page
+  let API_DOWN = false;      // the newest request failing is enough; stop asking this page
+  // a failure is the Studio's only when it is the newest request sent — a
+  // retired search's timeout says nothing, whether it lands before or after
+  // the newer search's answer (review catches: it switched a healthy Studio
+  // off for the page); an answer newer than every settled one brings it back
+  let API_SEQ = 0, API_SETTLED = 0;
 
   async function askStudio(path) {
     if (!API || API_DOWN) return null;
+    const seq = ++API_SEQ;
+    const settle = ok => {
+      if (ok ? seq > API_SETTLED : seq === API_SEQ) { API_SETTLED = seq; API_DOWN = !ok; }
+    };
     const ctl = new AbortController();
     const bell = setTimeout(() => ctl.abort(), API_TIMEOUT_MS);
     try {
       const r = await fetch(API + path, { signal: ctl.signal,
                                           credentials: "omit" });
       if (!r.ok) throw new Error(String(r.status));
-      return await r.json();
+      const out = await r.json();
+      settle(true);
+      return out;
     } catch (e) {
-      API_DOWN = true;
+      settle(false);
       return null;
     } finally { clearTimeout(bell); }
   }
@@ -83,7 +94,7 @@
     initStudio();
     wireStoryTabs();   // the front page's stories, one at a time (specs/24, /25)
     hydrateTopicTicks();   // a topic story's chapters grow their cut ticks — on the front page and on the story's own page (specs/25)
-    bsSpine(); bsScore(); bsYear(); bsRiver(); bsGallery();   // the broadsheet re-lit: the spine's type-ahead, the score, the year, the river, the front pages' filters (specs/29)
+    bsSpine(); bsScore(); bsYear(); bsYearStills(); bsRiver(); bsGallery();   // the broadsheet re-lit: the spine's type-ahead, the score, the year (and its stills, once seen), the river, the front pages' filters (specs/29)
     if (/\/app\/m\//.test(path)) { meeting(); wireFind(); }
     else if (/\/app\/r$/.test(path)) reel();
     else if (/\/app\/p$/.test(path)) paper();
@@ -7528,6 +7539,12 @@
   }
   const SQ_RANGES = [["1", "the last month", 1], ["6", "six months", 6], ["12", "a year", 12], ["all", "the whole record", 0]];
   let SQ_RANGE = "all";
+  /* the search the page is answering now: a newer one (or an emptied box)
+     retires it, and a retired search draws no list and no story over the
+     newer one's — a slow answer used to land last and win. Its `list` is the
+     list it first answered, put back when the stretch widens to the whole
+     record; `shown` is the stretch the list shows ("" = the whole record). */
+  let SQ_NOW = null;
   /* the stretch: the same day N months before the record's latest day
      (the day clamped to 28, so every month has it) — "the last month" is a
      month, not "since the first of last month" (a review catch) */
@@ -7552,14 +7569,16 @@
       const nx = segs[id + 1], pv = segs[id - 1];
       const after = nx && nx[0] === s[0] ? String(nx[3]) : "", before = pv && pv[0] === s[0] ? String(pv[3]) : "";
       const n = mentionsIn(s[3], after, pats);
-      out.push({ pid: m.pid || "", t: +s[1] || 0, text: String(s[3] || ""), before, after, mentions: n || 1 });
+      out.push({ id, pid: m.pid || "", t: +s[1] || 0, text: String(s[3] || ""), before, after, mentions: n || 1 });
     }
     return out;
   }
-  async function sqStory(q, ids, idx, feat) {
-    const box = $("#sq-story"); if (!box) return;
+  async function sqStory(q, ids, idx, feat, run) {
+    const box = $("#sq-story"); if (!box || run !== SQ_NOW) return;
     if (!ids.length) { box.innerHTML = ""; return; }
     const phrases = feat ? feat.phrases : [q.trim()];
+    // the list's own marks: a featured word's phrases whole, else the words typed
+    const marks = feat ? feat.phrases : (q.toLowerCase().match(/[a-z0-9]+/g) || []);
     // what the count read, said the way the pressed story says it
     const saidAs = phrases.map(p => `“${esc(p)}”`).join(" or ");
     // the meetings the story counts are the ones in the reader's scope —
@@ -7572,12 +7591,24 @@
     // whole record's count leads with — a narrower stretch keeps the town
     const whole = tpAggregate(meetings, hitsAll, { slug: "", name: q, q, phrases }, SCOPE.town || "", false);
     const townFixed = SCOPE.town || (whole && whole.town) || "";
+    // the list follows the stretch: a narrower one lists the lines it
+    // counted, newest first; the whole record puts back the list the search
+    // first answered — the Studio's closest lines, or the index's own
+    const listFor = (since, hits) => {
+      const res = $("#results");
+      if (!res || run !== SQ_NOW || !run.list || run.shown === since) return;
+      run.shown = since;
+      res.innerHTML = since ? sqStretchList(idx, hits, since, marks, q) : run.list;
+      paintCutTicks(); selReset();
+    };
     const draw = () => {
+      if (run !== SQ_NOW) return;
       const months = (SQ_RANGES.find(r => r[0] === SQ_RANGE) || SQ_RANGES[3])[2];
       const since = sqSince(latestDay, months);
       const ms = since ? meetings.filter(m => TP_DAY.test(m.date) && m.date >= since) : meetings;
       const keep = new Set(ms.map(m => m.pid));
       const hits = since ? hitsAll.filter(h => keep.has(h.pid)) : hitsAll;
+      listFor(since, hits);
       const d = tpAggregate(ms, hits, { slug: "", name: q, q, phrases }, townFixed, false);
       const range = `<div class="sq-range" role="radiogroup" aria-label="how far back to count">
         <span class="kicker">count</span>${SQ_RANGES.map(r => `<button type="button" class="sq-rb" role="radio" data-range="${r[0]}"
@@ -7589,8 +7620,14 @@
         // did say it: another town, or meetings with no town recorded
         const scopeName = townFixed || [SCOPE.town, SCOPE.body].filter(Boolean).join(" · ") || "a town the record names";
         const others = d ? [d, ...d.elsewhere].map(e => `${e.moments} in ${esc(e.town || "meetings with no town recorded")}`).join(", ") : "";
-        const why = (!whole && hitsAll.length && !since)
-          ? `the ${tpN(hitsAll.length, "line")} below are from meetings with no town recorded — the story needs a town to count by`
+        // lines, but none in a town the record names: said as what they are,
+        // over whichever stretch the list below holds (a review catch: a
+        // stretch said "nothing" over the lines it listed)
+        // (named, not pointed at: the list below may be the Studio's, or
+        // the newest eighty of them — re-review catches)
+        const one = hits.length === 1;
+        const why = (!d && hits.length)
+          ? `the ${tpN(hits.length, "line")} that ${one ? "says" : "say"} it${since ? `, since ${esc(tpDay(since))},` : ""} ${one ? "is from a meeting" : "are from meetings"} with no town recorded — the story needs a town to count by`
           : `nothing says ${saidAs} in ${esc(scopeName)}${since ? ` since ${esc(tpDay(since))}` : ""}${others ? ` — elsewhere on the record: ${others}` : ""}`;
         box.innerHTML = `<section class="sq-story tp-story"><span class="kicker">a word, over time — this search, told as a story</span>
           <h2 class="fp-hl" id="sq-hl">How ${esc(townFixed || "the record")} talks about ${esc(q)}</h2>${range}${rangeNote}
@@ -7605,6 +7642,12 @@
         [tpMonthName(d.first.date).replace(" ", " "), "first said", `${BASE}/m/${encodeURIComponent(d.first.pid)}#t${Math.floor(d.first.t)}`],
         [tpMonthName(d.latest.date).replace(" ", " "), "latest", `${BASE}/m/${encodeURIComponent(d.latest.pid)}#t${Math.floor(d.latest.t)}`],
         [hms(d.reel.short_runtime), "the supercut", d.reel.short]];   // one clip a night, as the pressed story's is
+      // the sentence over the list says the list painted below it: a
+      // stretch's own lines, the Studio's closest, or the index's newest
+      const byTown = d.elsewhere.length ? ` — ${d.moments} in ${esc(d.town)}, ${d.elsewhere.map(e => `${e.moments} in ${esc(e.town || "meetings with no town recorded")}`).join(", ")}` : "";
+      const listSays = since ? `the ${tpN(hits.length, "line")} themselves since ${esc(tpDay(since))}, newest first${run.live ? " (the words alone, as counted above)" : ""}${byTown}`
+        : run.live ? `the Studio’s ${tpN(run.n, "line")} below, closest first (the count above reads the words alone)`
+        : `the ${tpN(hitsAll.length, "line")} themselves, newest first${byTown}`;
       const busiest = d.months.reduce((p, x) => (!p || (+x.mentions > +p.mentions)) ? x : p, null);
       const silent = d.months.filter(x => x.meetings && !x.said).length;
       const p = d.peak;
@@ -7633,7 +7676,7 @@
           <p class="fp-say">Each row is a tape, start to end; a taller bar is a slice where “${esc(q)}” came up more. On ${esc(tpDay(p.date))} the ${esc(p.body || "board")} said it ${tpN(p.mentions, "time")} ${tpSpan(p.span)}. Every bar opens the tape there.</p></section>
         ${d.cowords.length ? `<section class="fp-part"><div class="sectionhead"><span class="kicker">the words beside it — what was said in the same breath</span></div>${tpCowordBars(d.cowords, q, SCOPE.town || "")}${picBtn("words")}
           <p class="fp-say">Counted in each line that says ${saidAs} and the lines either side of it, civic stopwords out. Each word opens the record’s search for the two together.</p></section>` : ""}
-        <p class="sq-count">the ${tpN(hitsAll.length, "line")} themselves, newest first${d.elsewhere.length ? ` — ${d.moments} in ${esc(d.town)}, ${d.elsewhere.map(e => `${e.moments} in ${esc(e.town || "meetings with no town recorded")}`).join(", ")}` : ""}${since ? ` (the list is the whole record; the count above is ${esc((SQ_RANGES.find(r => r[0] === SQ_RANGE) || SQ_RANGES[3])[1])})` : ""} — press <b>＋ reel</b> on any to cut it; <b>j</b> / <b>k</b> walk them, <b>c</b> cuts the one under the cursor</p>
+        <p class="sq-count">${listSays} — press <b>＋ reel</b> on any to cut it; <b>j</b> / <b>k</b> walk them, <b>c</b> cuts the one under the cursor</p>
       </section>`;
       wireRange();
       const tray = $("[data-sq=tray]", box), share = $("[data-sq=share]", box);
@@ -7660,7 +7703,9 @@
     const wireRange = () => {
       const rbs = $$(".sq-rb", box);
       rbs.forEach(b => {
-        b.onclick = () => { SQ_RANGE = b.dataset.range; draw(); const nb = $(`.sq-rb[data-range="${SQ_RANGE}"]`, box); if (nb) nb.focus(); };
+        // a retired search's story, still standing while the newer one loads,
+        // takes no press: it would set the next story's stretch unseen (a review catch)
+        b.onclick = () => { if (run !== SQ_NOW) return; SQ_RANGE = b.dataset.range; draw(); const nb = $(`.sq-rb[data-range="${SQ_RANGE}"]`, box); if (nb) nb.focus(); };
         b.onkeydown = e => {
           if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
           e.preventDefault();
@@ -7752,7 +7797,7 @@
       clearTimeout(deb);
       const val = inp.value.trim();
       if (val.length < 3) {
-        if (!val) { $("#results").innerHTML = ""; selReset();
+        if (!val) { SQ_NOW = null; $("#results").innerHTML = ""; selReset();
           const story = $("#sq-story"), guide = $("#sq-guide");
           if (story) story.innerHTML = ""; if (guide) guide.hidden = false; sqProgress(null); }
         return; }
@@ -7793,6 +7838,7 @@
      BEFORE the static planes are fetched, so a working Studio costs one
      request rather than one request plus a megabyte of index nobody reads. */
   async function runSearch(q) {
+    const run = SQ_NOW = { list: "", live: false, n: 0, shown: "" };
     const box = $("#results"); box.innerHTML = '<p class="hint">searching…</p>';
     const terms = (q.toLowerCase().match(/[a-z0-9]+/g) || []);
     const guide = $("#sq-guide"), story = $("#sq-story");
@@ -7807,19 +7853,22 @@
     if (SCOPE.pids.length) {
       saySearchIsStatic("This search reads inside the meetings it was given, so it is counted from "
         + "the edition’s index in your browser — every line, exactly. Nothing was sent anywhere.");
-      return staticSearch(q, terms, box);
+      return staticSearch(q, terms, box, run);
     }
     if (API && !API_DOWN) {
-      const live = await liveSearch(q, terms, box);
+      const live = await liveSearch(q, terms, box, run);
       if (live) return;
-      // It did not answer. Say so where the page promised otherwise, then do
-      // exactly what a desk edition does.
-      saySearchIsStatic(
-        "Meaning-search needs the Studio and it is not answering right now — "
-        + "searching the words in your browser instead. Nothing else on this "
-        + "page depends on it.");
     }
-    return staticSearch(q, terms, box);
+    // It did not answer — this search, or an earlier one on this page. Say so
+    // where the page promised otherwise, then do exactly what a desk edition
+    // does. (Said on every static search, not only the one that failed: a
+    // failure a newer search had retired said nothing, and the note went on
+    // promising meaning — a review catch.)
+    if (API) saySearchIsStatic(
+      "Meaning-search needs the Studio and it is not answering right now — "
+      + "searching the words in your browser instead. Nothing else on this "
+      + "page depends on it.");
+    return staticSearch(q, terms, box, run);
   }
 
   /* The Studio's answer, rendered with the provenance it reports per hit:
@@ -7827,7 +7876,7 @@
      `related` when only the lexical vector reached it. Returns false if the
      API did not answer, and the caller falls back — this function never
      renders an error, because an error is not what the reader gets. */
-  async function liveSearch(q, terms, box) {
+  async function liveSearch(q, terms, box, run) {
     // the featured-word lookup rides beside the API call, never after it, and
     // a static file that hangs never holds the list: past 2.5 s the typed
     // words mark it
@@ -7837,6 +7886,7 @@
     if (SCOPE.town) p.set("town", SCOPE.town);
     if (SCOPE.body) p.set("body", SCOPE.body);
     const r = await askStudio(`/api/search?${p}`);
+    if (run !== SQ_NOW) return true;     // a newer search has the page; this answer is spent
     if (!r || !Array.isArray(r.hits)) return false;
 
     // The server says which half actually answered, and it derives that from
@@ -7858,7 +7908,8 @@
       return true;
     }
     const feat = await featSoon, marks = feat ? feat.phrases : terms;
-    box.innerHTML = `<p class="hint">${tpN(r.hits.length, "line")} `
+    if (run !== SQ_NOW) return true;
+    const html = `<p class="hint">${tpN(r.hits.length, "line")} `
       + (where ? `in ${esc(where)}` : "across the record")
       + ` · <span class="live">live</span></p>`
       + r.hits.map(h => {
@@ -7869,21 +7920,26 @@
           <span class="ts">${hms(h.t)}</span>${why(h.why)}${mark(h.text || "", marks)}
           <span class="smeta">${esc(bits.filter(Boolean).join(" · "))}${h.speaker ? " · " + esc(h.speaker) : ""}</span></a>${searchTick(h.meeting_id, h.t, h.text, h.title, h.body, h.town, h.date)}</div>`;
       }).join("");
+    box.innerHTML = html;
+    Object.assign(run, { list: html, live: true, n: r.hits.length });
     paintCutTicks();
     // the Studio answered the list; the story of the search is still the
     // words themselves, counted from the record's own index (specs/25)
-    sqStoryFor(q, terms);
+    sqStoryFor(q, terms, run);
     return true;
   }
   /* the story for a query the live path answered: the index's own postings
      for the same terms — what the static path would have listed */
-  async function sqStoryFor(q, terms) {
-    const idx = await sqIndex(); if (!idx) { sqProgress(null); return; }
+  async function sqStoryFor(q, terms, run) {
+    const idx = await sqIndex(); if (run !== SQ_NOW) return;
+    // no index, no story — and not the last search's story left standing
+    if (!idx) { const story = $("#sq-story"); if (story) story.innerHTML = ""; sqProgress(null); return; }
     sqProgress(1, `reading the lines that say “${q}”…`);
     const feat = await sqFeatured(q);
     const ids = feat ? await sqPhraseIds(idx, feat.phrases) : await sqIds(idx, terms, q);
+    if (run !== SQ_NOW) return;
     sqProgress(2, `${tpN(ids.length, "line")} — counting, month by month…`);
-    await sqStory(q, ids, idx, feat);
+    await sqStory(q, ids, idx, feat, run);
     sqProgress(3, `${tpN(ids.length, "line")} counted`);
   }
   /* the front page's featured words (topics/index.json, specs/27 §2.3): a
@@ -7983,15 +8039,18 @@
     return `<span class="prov prov-${esc(w)}" title="${esc(WHY_SAYS[w])}">${esc(w)}</span>`;
   }
 
-  async function staticSearch(q, terms, box) {
+  async function staticSearch(q, terms, box, run) {
     const [idx, feat] = await Promise.all([sqIndex(), sqFeatured(q)]);
-    if (!idx) { box.innerHTML = '<p class="hint">the index didn\'t load</p>'; sqProgress(null); return; }
+    if (run !== SQ_NOW) return;
+    if (!idx) { box.innerHTML = '<p class="hint">the index didn\'t load</p>';
+      const story = $("#sq-story"); if (story) story.innerHTML = ""; sqProgress(null); return; }
     const { meta, segs } = idx;
     sqProgress(1, `${(+idx.shards.segments || segs.length).toLocaleString()} lines open — reading the ones that say “${q}”…`);
     // each term's prefix shard, intersected; exact-phrase-first on a
     // multi-word query (hits stays a list of segIds so a peek can reach
     // the ±1 neighbours) — the one rule the story counts by too
     let hits = feat ? await sqPhraseIds(idx, feat.phrases) : await sqIds(idx, terms, q);
+    if (run !== SQ_NOW) return;
     // a featured word's phrases highlight whole ("artificial intelligence"),
     // never a lone "artificial" (artificial turf)
     const marks = feat ? feat.phrases : terms;
@@ -8042,24 +8101,43 @@
     }
     // the count is the scope's own (a review catch: "80 moments in
     // Brookline" was the display's cap, over 441 lines the story had counted)
-    box.innerHTML = `<p class="hint">${tpN(cut, "line")} `
+    const html = `<p class="hint">${tpN(cut, "line")} `
       + (where ? `in ${esc(where)}` : "across the record")
       + (cut > hits.length ? ` — the newest ${hits.length} below` : "")
       + (noTown ? ` · ${tpN(noTown, "line")} from meetings with no town recorded` : "")
       + (where && cut < total ? ` · ${total - cut} more elsewhere on the record` : "")
-      + `</p>` +
-      hits.map(id => {
-        const [mi, t, spk, text] = segs[id];
-        const m = meta[mi] || {};
-        return `<div class="swrap"><a class="sresult" data-sid="${id}" href="${BASE}/m/${m.pid}#t${Math.floor(t)}">
-          <span class="ts">${hms(t)}</span>${mark(text, marks, segs[id + 1] && segs[id + 1][0] === mi ? segs[id + 1][3] : "")}
-          <span class="smeta">${esc([m.title, m.body, SCOPE.town ? "" : m.town, m.date].filter(Boolean).join(" · "))}${spk ? " · " + esc(spk) : ""}</span>${peek(segs, id, mi)}</a>${searchTick(m.pid, t, text, m.title, m.body, m.town, m.date)}</div>`;
-      }).join("");
+      + `</p>` + hits.map(id => sqItem(idx, id, marks)).join("");
+    box.innerHTML = html;
+    Object.assign(run, { list: html, n: cut });
     paintCutTicks();
     selReset();
     // the story of the search, over every line it found (not the eighty shown)
-    await sqStory(q, storyIds, idx, feat);
+    await sqStory(q, storyIds, idx, feat, run);
     sqProgress(3, `${tpN(storyIds.length, "line")} counted`);
+  }
+  /* one line of a list read off the index: its time, the words marked (a
+     phrase that ran on into the next caption marked where it starts), the
+     meeting's facts, the ±1 peek, and its tick */
+  function sqItem(idx, id, marks) {
+    const { meta, segs } = idx;
+    const [mi, t, spk, text] = segs[id];
+    const m = meta[mi] || {};
+    return `<div class="swrap"><a class="sresult" data-sid="${id}" href="${BASE}/m/${m.pid}#t${Math.floor(t)}">
+          <span class="ts">${hms(t)}</span>${mark(text, marks, segs[id + 1] && segs[id + 1][0] === mi ? segs[id + 1][3] : "")}
+          <span class="smeta">${esc([m.title, m.body, SCOPE.town ? "" : m.town, m.date].filter(Boolean).join(" · "))}${spk ? " · " + esc(spk) : ""}</span>${peek(segs, id, mi)}</a>${searchTick(m.pid, t, text, m.title, m.body, m.town, m.date)}</div>`;
+  }
+  /* the list over a stretch: the lines the story counted since its first
+     day, newest first, the newest eighty shown — each line drawn as the
+     index's list draws it */
+  function sqStretchList(idx, hits, since, marks, q) {
+    const where = scopeWords(), day = esc(tpDay(since));
+    if (!hits.length) return `<p class="hint">nothing says “${esc(q)}”${where ? ` in ${esc(where)}` : ""} since ${day}.</p>`;
+    const shown = hits.slice(0, 80);
+    const noTown = SCOPE.town ? hits.filter(h => !((idx.meta[(idx.segs[h.id] || [])[0]] || {}).town)).length : 0;
+    return `<p class="hint">${tpN(hits.length, "line")} ${where ? `in ${esc(where)}` : "across the record"} since ${day}`
+      + (hits.length > shown.length ? ` — the newest ${shown.length} below` : "")
+      + (noTown ? ` · ${tpN(noTown, "line")} from meetings with no town recorded` : "")
+      + `</p>` + shown.map(h => sqItem(idx, h.id, marks)).join("");
   }
   /* The peek: ±1 segment of context from the segs plane, already in hand
      because the static path loaded it. Shown on hover (CSS); it costs no
@@ -8366,6 +8444,35 @@
     if (narrow) { if (narrow.addEventListener) narrow.addEventListener("change", letGo); else if (narrow.addListener) narrow.addListener(letGo); }
     // the first press on a still names the meeting; a second opens it (the link)
     tapes.forEach(a => a.addEventListener("click", e => { if (pick === a.dataset.pid) return; e.preventDefault(); pick = a.dataset.pid; paint(); }));
+  }
+  /* the year's stills wait to be seen: a phone shows board 3's dots and
+     never the tapes, so the pressed <image>s carry data-href and take their
+     still only once the strip has a box — on a wide screen, when a screen
+     turns across 720px, or on paper (which does not wait for them: a phone's
+     print may carry a tape's colour where its still had not yet come). With
+     the script off each tape stays its town's colour and its day, as the
+     older tapes are. */
+  function bsYearStills() {
+    const svg = $(".bs-year-svg"); if (!svg) return;
+    let wait = $$("image[data-href]", svg); if (!wait.length) return;
+    const narrow = window.matchMedia ? window.matchMedia("screen and (max-width:720px)") : null;
+    const show = () => {
+      for (const im of wait) {
+        // a still that cannot come — offline and never cached (a phone
+        // turned wide), a 404 — goes, and the tape's colour and day stand,
+        // not the browser's broken picture over them (a review catch)
+        im.addEventListener("error", () => im.remove(), { once: true });
+        im.setAttribute("href", im.getAttribute("data-href") || ""); im.removeAttribute("data-href");
+      }
+      wait = [];
+      if (narrow) { if (narrow.removeEventListener) narrow.removeEventListener("change", check); else if (narrow.removeListener) narrow.removeListener(check); }
+      window.removeEventListener("beforeprint", show);
+    };
+    const check = () => { if (wait.length && svg.getClientRects().length) show(); };
+    check();
+    if (!wait.length) return;
+    if (narrow) { if (narrow.addEventListener) narrow.addEventListener("change", check); else if (narrow.addListener) narrow.addListener(check); }
+    window.addEventListener("beforeprint", show);
   }
   /* the front pages (board 9): a filter narrows the grid — by who made a
      page, by town, by the week, by kind — and the count line says what
