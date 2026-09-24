@@ -15,7 +15,7 @@
 <link rel="icon" href="/app/favicon.svg">
 <link rel="manifest" href="/app/manifest.webmanifest">
 <link rel="alternate" type="application/rss+xml" title="The record — new meetings and resurfacings" href="/app/feeds/firehose.xml">
-<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.21">
+<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.23">
 </head><body><header class="masthead">
   <div class="nameplate">
     <a class="brand" href="/app/" aria-label="publicrecord.studio — the record">
@@ -23,8 +23,8 @@
       <span class="wm">publicrecord<span class="tld">.studio</span></span>
     </a>
   </div>
-  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">6</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">14</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">Our AI Constitution</a></div><span class="dateline">pressed from the record of <b>2026-09-22</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
-  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink" href="/app/s">Search</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink" href="/app/press">The press</a></nav>
+  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">12</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">14</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">Our AI Constitution</a></div><span class="dateline">pressed from the record of <b>2026-09-22</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
+  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink" href="/app/s">Search</a><a class="navlink" href="/app/glossary/">The glossary</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink" href="/app/press">The press</a></nav>
 </header><main class="main paper" id="app"><div class="scopebanner" id="scopebanner" hidden></div>
   <section class="aipage">
     <a class="back" href="/app/">← the record</a>
@@ -178,7 +178,9 @@
             that wrote the words</td>
           <td>our pipeline, at ingest, over public transcript text</td>
           <td>an extractive summary — sentences drawn from the transcript
-            itself, labeled <code>extractive</code></td></tr>
+            itself, labeled <code>extractive</code>. The same stands when a
+            model's answer comes back cut off at its length limit: a fragment
+            is refused, never pressed</td></tr>
         <tr><td>the reading, drafted</td>
           <td>drafts three short paragraphs — what the meeting meant, who
             moved it, what to watch — with a timestamp beside every claim</td>
@@ -187,11 +189,34 @@
             paper’s reading block</td>
           <td>our pipeline, at ingest, over public transcript text</td>
           <td>the counted reading stands alone — decisions, questions, names
-            and pushback drawn from the transcript by open rules</td></tr>
+            and pushback drawn from the transcript by open rules; a draft cut
+            off at its length limit is refused the same way</td></tr>
+        <tr><td>the glossary</td>
+          <td>wrote the plain definitions of the civic words the record uses —
+            warrant article, free cash, override, docket — drawing on the
+            public source each entry names</td>
+          <td>Anthropic <code>Claude</code> (<code>claude-opus-5-5</code>) —
+            labeled on the glossary’s own page, which says whether a person
+            has read them yet</td>
+          <td>Anthropic’s servers, through the coding assistant the developers
+            used while writing this code — the text is in the open
+            repository; never at press time, never in your browser. The counts
+            beside each word are the press’s, and no model counts them</td>
+          <td>the words, their counts and their sources stand; where an entry
+            and its source differ the source is the authority, and a
+            correction is dated beside the entry</td></tr>
         <tr><td>issue names &amp; labels</td>
           <td>suggests a plain name for a thread that spans meetings</td>
-          <td>the same Gemini lane, labeled the same way</td>
-          <td>our pipeline, at press time</td>
+          <td>the model named in the issue’s own plane —
+            <code>name_origin</code> says <code>ai:&lt;model&gt;</code>, or
+            that the keywords named it. The names on the record today were
+            drafted by OpenAI <code>gpt-4o-mini</code>
+            (<code>ai:gpt-4o-mini</code>), and each issue page says “Named by
+            a model”</td>
+          <td>the desk, when a steward built the threads on their own key, and
+            carried here by the import — never at press time, never in your
+            browser. A rebuild on the hosted service carries no model key and
+            names by keywords</td>
           <td>a keyword-derived name</td></tr>
         <tr><td>transcripts</td>
           <td>speech-to-text, only when a tape arrives with no official
@@ -223,6 +248,7 @@
       with the network cable out of the wall. That is what “locally-owned AI”
       means here: not a slogan, a download.
       <a href="/app/press">Get the desk from the press →</a></p>
+    <div class="presscta"><a class="btn deskdl" href="https://github.com/amateurmenace/control-z/releases/download/v2.1.0/civicmedia-studio-2.1.0-macos-arm64.dmg" rel="noopener" title="Civic Media Studio 2.1.0 for macOS (Apple silicon)">↓ Get the desktop app — macOS</a><span class="hint">Civic Media Studio 2.1.0 · macOS · Apple silicon</span></div>
 
     <div class="sectionhead"><span class="kicker">understand it deeper</span></div>
     <ul class="ailinks">
@@ -244,7 +270,7 @@
     <p class="hint">This page is made to be shared — the direct link is
       <a href="https://publicrecord.studio/constitution"><b>publicrecord.studio/constitution</b></a>.
       This edition was pressed 2026-09-22
-      from a corpus fingerprinted 6865a1f2ec625c8a. When our
+      from a corpus fingerprinted 354cd79f85868b74. When our
       use of AI changes, this page changes in the same commit.</p>
   </section>
 </main><footer class="foot">
@@ -258,5 +284,5 @@
     <a href="https://brooklineinteractive.org">brookline interactive group</a>.
     this project uses AI in accordance with
     <a href="/app/ai">Our AI Constitution</a>.</span>
-  <span class="ed">edition 2026-09-22 · v2.1.21</span>
-</footer><script src="/app/app.js?v=2.1.21"></script></body></html>
+  <span class="ed">edition 2026-09-22 · v2.1.23</span>
+</footer><script src="/app/app.js?v=2.1.23"></script></body></html>

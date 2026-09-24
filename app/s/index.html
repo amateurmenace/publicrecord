@@ -15,7 +15,7 @@
 <link rel="icon" href="/app/favicon.svg">
 <link rel="manifest" href="/app/manifest.webmanifest">
 <link rel="alternate" type="application/rss+xml" title="The record — new meetings and resurfacings" href="/app/feeds/firehose.xml">
-<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.21">
+<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.23">
 </head><body><header class="masthead">
   <div class="nameplate">
     <a class="brand" href="/app/" aria-label="publicrecord.studio — the record">
@@ -23,8 +23,8 @@
       <span class="wm">publicrecord<span class="tld">.studio</span></span>
     </a>
   </div>
-  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">6</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">14</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">Our AI Constitution</a></div><span class="dateline">pressed from the record of <b>2026-09-22</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
-  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink active" href="/app/s">Search</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink" href="/app/press">The press</a></nav>
+  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">12</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">14</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">Our AI Constitution</a></div><span class="dateline">pressed from the record of <b>2026-09-22</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
+  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink active" href="/app/s">Search</a><a class="navlink" href="/app/glossary/">The glossary</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink" href="/app/press">The press</a></nav>
 </header><main class="main paper" id="app"><div class="scopebanner" id="scopebanner" hidden></div>
   <section class="searchpage">
     <h1>Search the record</h1>
@@ -32,7 +32,7 @@
       <input name="q" id="q" placeholder="a phrase, a topic, a street name…" aria-label="Search">
       <button class="btn primary" type="submit">Search</button>
     </form>
-    <div class="searchfilters"><label class="filt">town <select name="town" id="townsel"><option value="">every town</option><option value="Boston">Boston</option><option value="Brookline">Brookline</option></select></label><label class="filt">body <select name="body" id="bodysel"><option value="">every body</option><option value="Select Board">Select Board (12)</option><option value="School Committee">School Committee (3)</option><option value="City Council Committee">City Council Committee (2)</option><option value="BPDA">BPDA (1)</option><option value="City Council">City Council (1)</option><option value="Zoning Board of Appeal">Zoning Board of Appeal (1)</option></select></label></div>
+    <div class="searchfilters"><label class="filt">town <select name="town" id="townsel"><option value="">every town</option><option value="Boston">Boston</option><option value="Brookline">Brookline</option></select></label><label class="filt">body <select name="body" id="bodysel"><option value="">every body</option><option value="Select Board">Select Board (12)</option><option value="City Council Committee">City Council Committee (7)</option><option value="School Committee">School Committee (3)</option><option value="Zoning Board of Appeal">Zoning Board of Appeal (2)</option><option value="BPDA">BPDA (1)</option><option value="City Council">City Council (1)</option></select></label></div>
     <p class="hint" id="search-note">Search reads the record two ways at once — the words you typed, and what they mean. Nothing about you is sent with the query.</p>
     <div class="sq-prog" id="sq-prog" hidden aria-live="polite"><span class="sq-progbar"><i></i></span><span class="sq-progtext"></span></div>
     <div id="sq-story"></div>
@@ -47,7 +47,7 @@
         <li><b>Cut it, share it.</b> Press <b>▶ play all</b> and the hits play as a reel. Press <b>＋ reel</b> on any hit to cut your own. The link is the share — no account, nothing uploaded.</li>
       </ol>
       <p class="tp-tries"><span class="kicker">try one</span><a class="btn tp-try" href="/app/s?q=Town%20Council%20Office">Town Council Office</a><a class="btn tp-try" href="/app/s?q=Warrant%20Articles">Warrant Articles</a><a class="btn tp-try" href="/app/s?q=Complete%20Streets">Complete Streets</a><a class="btn tp-try" href="/app/s?q=Equal%20Access">Equal Access</a><a class="btn tp-try" href="/app/s?q=Affordable%20Housing">Affordable Housing</a><a class="btn tp-try" href="/app/s?q=Artificial%20Intelligence">Artificial Intelligence</a></p>
-      <div class="sq-worked"><span class="kicker">a search, told as a story</span><div class="pf-cards"><a class="pf-card" href="/app/topic/ai/"><b>How Brookline talks about AI</b><span class="pf-sub">the search for “AI”, told as a story — 80 mentions across 10 meetings, month by month, with a supercut</span></a></div></div>
+      <div class="sq-worked"><span class="kicker">a search, told as a story</span><div class="pf-cards"><a class="pf-card" href="/app/topic/ai/"><b>How Brookline talks about AI</b><span class="pf-sub">the search for “AI”, told as a story — 80 mentions across 10 meetings, month by month, with a supercut</span></a><a class="pf-card" href="/app/topic/housing/"><b>How Brookline talks about housing</b><span class="pf-sub">the search for “housing”, told as a story — 448 mentions across 13 meetings, month by month, with a supercut</span></a></div></div>
       <p class="sq-keys"><span class="kicker">keys</span> <kbd>/</kbd> search from any page · <kbd>j</kbd> <kbd>k</kbd> walk the hits · <kbd>enter</kbd> opens the tape · <kbd>c</kbd> cuts the hit under the cursor</p>
     </div>
   </section>
@@ -62,5 +62,5 @@
     <a href="https://brooklineinteractive.org">brookline interactive group</a>.
     this project uses AI in accordance with
     <a href="/app/ai">Our AI Constitution</a>.</span>
-  <span class="ed">edition 2026-09-22 · v2.1.21</span>
-</footer><script src="/app/app.js?v=2.1.21"></script></body></html>
+  <span class="ed">edition 2026-09-22 · v2.1.23</span>
+</footer><script src="/app/app.js?v=2.1.23"></script></body></html>

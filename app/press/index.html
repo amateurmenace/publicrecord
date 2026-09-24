@@ -15,7 +15,7 @@
 <link rel="icon" href="/app/favicon.svg">
 <link rel="manifest" href="/app/manifest.webmanifest">
 <link rel="alternate" type="application/rss+xml" title="The record — new meetings and resurfacings" href="/app/feeds/firehose.xml">
-<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.21">
+<link rel="preload" href="/app/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/app/fonts/jetbrains-mono-700.woff2" as="font" type="font/woff2" crossorigin><link rel="stylesheet" href="/app/app.css?v=2.1.23">
 </head><body><header class="masthead">
   <div class="nameplate">
     <a class="brand" href="/app/" aria-label="publicrecord.studio — the record">
@@ -23,8 +23,8 @@
       <span class="wm">publicrecord<span class="tld">.studio</span></span>
     </a>
   </div>
-  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">6</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">14</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">Our AI Constitution</a></div><span class="dateline">pressed from the record of <b>2026-09-22</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
-  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink" href="/app/s">Search</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink active" href="/app/press">The press</a></nav>
+  <div class="folio"><div class="scope" id="scope"><span class="scopelabel">town</span><span class="scopenow" id="scopenow">the whole record</span><div class="scopetowns"><a class="scopetown" href="/app/?town=Boston" data-town="Boston">Boston<span class="scopen">12</span></a><a class="scopetown" href="/app/?town=Brookline" data-town="Brookline">Brookline<span class="scopen">14</span></a><a class="scopetown" href="/app/" data-town="">the whole record</a></div><a class="scopeai" href="/app/ai">Our AI Constitution</a></div><span class="dateline">pressed from the record of <b>2026-09-22</b></span><a class="cov6" href="/app/covenant">no accounts · no tracking · yours</a></div>
+  <nav class="sectionnav" aria-label="Sections"><a class="navlink" href="/app/">The record</a><a class="navlink" href="/app/s">Search</a><a class="navlink" href="/app/glossary/">The glossary</a><a class="navlink" href="/app/officials">The votes</a><a class="navlink" href="/app/analytics">The record drawn</a><a class="navlink" href="/app/graph">The issue graph</a><a class="navlink" href="/app/watching">Still watching</a><a class="navlink active" href="/app/press">The press</a></nav>
 </header><main class="main paper" id="app"><div class="scopebanner" id="scopebanner" hidden></div>
   <section class="press">
     <a class="back" href="/app/">← the record</a>
@@ -41,8 +41,9 @@
     <div class="sectionhead"><span class="kicker">control-z — the finishing tools</span></div>
     <div class="toollist"><div class="toolrow" id="pivot"><div class="toolname">Pivot<span class="tverb">follows the subject</span></div><div class="toolwhy">Pivot reframes your own master files — footage that lives on your disk, not on the record.</div></div><div class="toolrow" id="stencil"><div class="toolname">Stencil<span class="tverb">cuts the stencil</span></div><div class="toolwhy">Stencil runs SAM 2 on your GPU against your clip — a model runtime and footage that never leave the desk.</div></div><div class="toolrow" id="scribe"><div class="toolname">Scribe<span class="tverb">writes it all down</span></div><div class="toolwhy">Scribe listens to your audio on-device — the transcribe pass is local compute on files you hold. <a class="liveshere" href="/app/">its work already lives here → every transcript you&#x27;re reading here</a></div></div><div class="toolrow" id="clear"><div class="toolname">Clear<span class="tverb">rescues the take</span></div><div class="toolwhy">Clear rescues your dialogue with local DSP — it works on the audio file in your hand.</div></div><div class="toolrow" id="rise"><div class="toolname">Rise<span class="tverb">restores the detail</span></div><div class="toolwhy">Rise upscales your masters with a local model — the frames are yours and the compute is on-device.</div></div><div class="toolrow" id="depth"><div class="toolname">Depth<span class="tverb">maps the scene</span></div><div class="toolwhy">Depth reads your footage into a depth map on-device and writes Fusion templates for your Resolve.</div></div><div class="toolrow" id="index"><div class="toolname">Index<span class="tverb">knows where everything is</span></div><div class="toolwhy">Index catalogs the folders on your own drives — it searches files only your machine can see.</div></div><div class="toolrow" id="slate"><div class="toolname">Slate<span class="tverb">makes it official</span></div><div class="toolwhy">Slate renders broadcast graphics — ProRes and PNG files written to your disk for your air chain.</div></div></div>
     <div class="presscta">
-      <a class="btn primary" href="https://github.com/amateurmenace/control-z/releases/latest">Get the desktop app — macOS</a>
-      <span class="hint">macOS 12+ · Apple silicon · signed &amp; notarized</span>
+      <a class="btn primary deskdl" href="https://github.com/amateurmenace/control-z/releases/download/v2.1.0/civicmedia-studio-2.1.0-macos-arm64.dmg" rel="noopener" title="Civic Media Studio 2.1.0 for macOS (Apple silicon)">↓ Get the desktop app — macOS</a>
+      <span class="hint">Civic Media Studio 2.1.0 · macOS 12+ · Apple silicon · signed &amp; notarized ·
+        <a href="https://github.com/amateurmenace/control-z/releases/latest">every release →</a></span>
     </div>
     <p class="hint">Civic Media Studio and The Public Record are
       <a href="https://communityai.studio">a Community AI Project</a> — designed + developed by Stephen Walter with Brookline Interactive Group &amp; Neighborhood AI · CC BY-SA 4.0.</p>
@@ -58,5 +59,5 @@
     <a href="https://brooklineinteractive.org">brookline interactive group</a>.
     this project uses AI in accordance with
     <a href="/app/ai">Our AI Constitution</a>.</span>
-  <span class="ed">edition 2026-09-22 · v2.1.21</span>
-</footer><script src="/app/app.js?v=2.1.21"></script></body></html>
+  <span class="ed">edition 2026-09-22 · v2.1.23</span>
+</footer><script src="/app/app.js?v=2.1.23"></script></body></html>
