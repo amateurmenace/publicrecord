@@ -874,6 +874,16 @@ a.pb-doc:hover b{color:var(--accent);text-decoration:underline}
 .pb-take{margin:10px 0 0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted);line-height:1.5}
 .pb-take a{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
 .pb-take a:hover{color:var(--write)}
+/* said alongside it (specs/29 board 6): chips, on a paper and on the issue page */
+.pb-beside{display:flex;flex-direction:column;gap:10px}
+.pb-beside .kicker a{color:inherit;text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--rule)}
+.pb-beside .kicker a:hover{color:var(--write)}
+.pb-chips{display:flex;flex-wrap:wrap;gap:8px}
+.pb-chip{display:inline-flex;align-items:baseline;gap:6px;padding:6px 10px;border:1px solid var(--rule);border-radius:999px;
+  background:var(--card);color:var(--ink);font-size:14px;line-height:1.2;text-decoration:none;min-height:32px;box-sizing:border-box}
+.pb-chip:hover{border-color:var(--write);color:var(--write)}
+.pb-chip-n{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.pb-beside .pb-say{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted);margin:0;line-height:1.5}
 .pb-door-go:hover{color:var(--paper);text-decoration-color:var(--rust)}
 .pb-door-go:focus-visible{outline:var(--border-w-strong) solid var(--paper);outline-offset:2px}
 .pk-hollow{border-color:var(--rust)}

@@ -840,6 +840,8 @@
     : b.kind === "doc" ? `📄 ${b.dkind ? b.dkind + " — " : ""}${b.title || b.doc}`
     : b.kind === "digest" ? `⟳ what changed — ${b.name || b.slug} (${b.n})`
     : b.story === "issue" ? `◈ ${b.name || b.slug}`
+    : b.kind === "beside" ? `◇ said alongside — ${b.name || b.slug}`
+    : b.kind === "reading" && b.slug ? `✎ the record’s reading — ${b.name || b.slug}`
     : `§ ${b.title || b.pid}`;
   const blockLabelL = b => blockLabel(b) + (b.layout ? ` · ${LAYOUT_LABEL[b.layout]}` : "");
   function refreshPaperSummary(focus) {
@@ -1574,7 +1576,7 @@
     (!SCOPE.body || (body || "") === SCOPE.body);
   const inPids = pid => !(SCOPE.pids && SCOPE.pids.length) || SCOPE.pids.includes(String(pid || ""));
   /* the scope, said: "the 3 meetings of a front page · Brookline · Select Board" */
-  const scopeWords = () => [(SCOPE.pids && SCOPE.pids.length) ? `the ${tpN(SCOPE.pids.length, "meeting")} a front page cites` : "",
+  const scopeWords = () => [(SCOPE.pids && SCOPE.pids.length) ? `the ${tpN(SCOPE.pids.length, "meeting")} this search is kept to` : "",
     SCOPE.town, SCOPE.body].filter(Boolean).join(" · ");
 
   /* ================= HOME (scope + body filter) ================= */
@@ -3325,7 +3327,7 @@
   // paperV can mint (a twin test holds the two lists equal: v=4 shipped in
   // specs/24 without joining this list, and every v=4 link the press
   // pressed read as "shared from a newer version" until specs/29 P1)
-  const PAPER_VS = ["1", "2", "3", "4", "5"];
+  const PAPER_VS = ["1", "2", "3", "4", "5", "6"];
   /* the layouts a block may ask for (specs/23 C1) — an enum, never data:
        lead — the block is the paper's lead: full width, the large treatment
        head — the block stands as a section head: its name, over a rule
@@ -3378,7 +3380,8 @@
   // one meeting's votes, the record's reading; inlined so the twin that
   // lifts this line alone still runs
   // v=5: the broadsheet's blocks (specs/29 P1) — inlined for the same reason
-  const paperV = p => p.blocks.some(b => ["lead", "week", "threads", "strip", "names", "search"].includes(b.kind)) ? "5"
+  const paperV = p => p.blocks.some(b => b.kind === "beside") ? "6"   // specs/29 board 6: said alongside an issue
+    : p.blocks.some(b => ["lead", "week", "threads", "strip", "names", "search"].includes(b.kind)) ? "5"
     : p.blocks.some(b => b.kind === "reading" || (b.kind === "chart"
       && (b.chart === "numbers" || b.chart === "shape" || b.chart === "ledger" || (b.chart === "votes" && !!b.pid)))) ? "4"
     : p.blocks.some(b => b.layout || C2_KINDS.includes(b.kind)) ? "3"
@@ -3671,6 +3674,11 @@
     // scoped kinds may name a municipality (a slug), names may name a who
     // instead (who wins when a hand-edited draft carries both); a search box
     // names nothing. Labels ride the DRAFT only, as every kind's do.
+    if (b.kind === "beside" && PAPER_REF.test(b.slug || "")) {
+      const nb = { kind: "beside", slug: b.slug };
+      if (typeof b.name === "string") nb.name = b.name;
+      return nb;
+    }
     if (b.kind === "lead" && PAPER_REF.test(b.pid || "")) {
       const nb = { kind: "lead", pid: b.pid };
       for (const k of ["title", "date", "town"]) if (typeof b[k] === "string") nb[k] = b[k];
@@ -3714,6 +3722,7 @@
         : b.kind === "doc" ? { kind: "doc", pid: b.pid, doc: b.doc }
         : b.kind === "digest" ? { kind: "digest", slug: b.slug, n: b.n }
         : b.kind === "lead" ? { kind: "lead", pid: b.pid }
+        : b.kind === "beside" ? { kind: "beside", slug: b.slug }
         : b.kind === "search" ? { kind: "search" }
         : BS_SCOPED.includes(b.kind)
           ? (b.who ? { kind: b.kind, who: b.who } : b.town ? { kind: b.kind, town: b.town } : { kind: b.kind })
@@ -3757,6 +3766,7 @@
       // to every linkifier that trims the period — a review catch), or with
       // t:<town> / (names) w:<who> after the dot; s the search box.
       : b.kind === "lead" ? `l.${encodeURIComponent(b.pid)}`
+      : b.kind === "beside" ? `e.${encodeURIComponent(b.slug)}`   // said alongside an issue (v=6)
       : b.kind === "search" ? "s"
       : BS_SCOPED.includes(b.kind)
         ? BS_PART[b.kind] + (b.who ? "." + encodeURIComponent("w:" + b.who) : b.town ? "." + encodeURIComponent("t:" + b.town) : "")
@@ -3870,6 +3880,12 @@
               doc = decodeURIComponent(rest.slice(tilde + 1)).trim(); } catch { return; }
         if (!PAPER_REF.test(pid) || !DOC_REF.test(doc)) return;
         out.blocks.push({ kind: "doc", pid, doc });
+      } else if (kind === "e") {
+        // the words said alongside an issue (specs/29 board 6): a slug, no more
+        let slug = "";
+        try { slug = decodeURIComponent(rest).trim(); } catch { return; }
+        if (!PAPER_REF.test(slug)) return;
+        out.blocks.push({ kind: "beside", slug });
       } else if (kind === "g") {
         const colon = rest.lastIndexOf(":"); if (colon < 1) return;
         let slug = "";
@@ -4247,6 +4263,23 @@
     afterAdd(i, at);
     toast("the record’s reading added — it reads from the record when your paper renders");
   }
+  async function addBesideToPaper(slug, at) {
+    if (!PAPER_REF.test(slug || "")) return;
+    const dup = p => p.blocks.some(b => b.kind === "beside" && b.slug === slug);
+    if (dup(readPaper())) { toast("the words beside this issue are already in your paper"); return; }
+    const it = await getJSON(`${BASE}/issues/${encodeURIComponent(slug)}.json`) || {};
+    const nb = normalizeBlock({ kind: "beside", slug, name: it.name || "" });
+    if (!nb) return;
+    const p = readPaper();
+    if (dup(p)) { toast("the words beside this issue are already in your paper"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) {
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) {
+      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast("the words beside this issue added — it reads from the record when your paper renders");
+  }
   /* the templates (specs/29 board 7) — each a list of blocks the record
      fills and three questions the writer answers; the questions are the
      paper, and a template never writes a word of it. `pick` is what the
@@ -4259,7 +4292,7 @@
       draws: "the still, the counted lede, the moments that decided it, the roll calls, the shape of the tape",
       asks: ["What was the room really about?", "Which moment turned it?", "What did it leave undone?"] },
     issue: { name: "An issue over time", pick: "issue",
-      draws: "a timeline of the meetings that took it up, a reel of its latest moments, how the night that said it most was framed",
+      draws: "a timeline of the meetings that took it up, a reel of its latest moments, how the night that said it most was framed, and the words said alongside it",
       asks: ["What changed between the first meeting and the last?", "Who pushed, and who pushed back?", "What is still on the table — what should a reader watch for next?"] },
     vote: { name: "A vote and its history", pick: "issue",
       draws: "the tally of every roll call on the question, the words around the first four, the record’s reading",
@@ -4339,6 +4372,7 @@
                   { kind: "note", text: "" },
                   ...(clips.length ? [{ kind: "reel", clips, layout: "half" }] : []),
                   ...(loud ? [{ kind: "chart", chart: "framing", pid: loud.pid, title: loud.title || "", layout: "half" }] : []),
+                  { kind: "beside", slug: ref.slug, name },   // board 6: said alongside it, under the reel and the framing
                   { kind: "search" }];
       } else {
         const led = (it.ledger || []).filter(v => v && PAPER_REF.test(v.pid || "") && typeof v.t === "number");
@@ -4475,6 +4509,10 @@
         : b.kind === "digest"
         ? { kind: "digest", slug: b.slug, n: b.n, name: b.name || "",
             computed: "from the issue's own timeline at render",
+            url: `${location.origin}${BASE}/i/${b.slug}` }
+        : b.kind === "beside"
+        ? { kind: "beside", slug: b.slug, name: b.name || "",
+            computed: "the phrases the press counted beside the issue, from its own plane at render",
             url: `${location.origin}${BASE}/i/${b.slug}` }
         : b.kind === "reel"
         ? { kind: "reel", runtime: reelRuntime(b.clips),
@@ -4812,7 +4850,7 @@
       else if (b.kind === "chart" && b.pid) mpids.add(b.pid);      // framing · numbers · shape · votes, of one meeting
       else if (b.kind === "chart" && b.slug) islugs.add(b.slug);   // reach · numbers · ledger, of one issue
       else if (b.kind === "quote" || b.kind === "doc") mpids.add(b.pid);
-      else if (b.kind === "digest") islugs.add(b.slug);
+      else if (b.kind === "digest" || b.kind === "beside") islugs.add(b.slug);
       else if (b.kind === "reading") { if (b.pid) mpids.add(b.pid); else islugs.add(b.slug); }
     }
     for (const b of doc.blocks)
@@ -4939,6 +4977,27 @@
   /* what a page is made of, read off its blocks and the planes this render
      fetched: the kind of front page (by its lead), the towns of its meetings,
      its meetings, and the labels the head carries — who wrote which part */
+  /* said alongside it (specs/29 board 6): the phrases said in the same
+     breath as an issue, counted by the press (web/beside.py) and carried on
+     the issue's plane; each chip opens the record's search for the phrase
+     within the issue's own meetings (the search page's m= scope). The chips
+     are the twin of charts.beside_chips — a node test holds them byte for
+     byte; the block around them is the reader's own. */
+  const bsBesideChips = (words, pids) => {
+    const ws = (words || []).filter(w => w && typeof w === "object" && String(w.phrase || "").trim());
+    if (!ws.length) return "";
+    const m = (pids || []).filter(Boolean).map(String).slice(0, 64).join(",");   // the search page reads 64 pids off m= (scopePids)
+    return `<div class="pb-chips">${ws.map(w => `<a class="pb-chip" href="${BASE}/s?q=${encodeURIComponent(String(w.phrase))}${m ? "&amp;m=" + m : ""}" title="“${bsEsc(String(w.phrase))}” in ${tpN(Math.floor(+w.meetings || 0), "meeting")} — search them">${bsEsc(String(w.phrase))} <span class="pb-chip-n">${Math.floor(+w.n || 0)}</span></a>`).join("")}</div>`;
+  };
+  function bsBesideBlock(it, slug) {
+    const pids = (it.timeline || []).map(n => n && n.pid).filter(Boolean);
+    const chips = bsBesideChips(it.beside, pids);
+    return `<section class="pb-beside"><span class="kicker">said alongside it — <a href="${BASE}/i/${esc(slug)}">${esc(it.name || slug)}</a></span>`
+      + (chips
+        ? chips + `<p class="pb-say">counted in every line the record filed under the issue and the line either side; a phrase that is only the issue’s own name, or one of its other names, is left out; each opens the record’s search for the phrase within the issue’s own meetings</p>`
+        : `<p class="pb-say">nothing was said beside it often enough to count — a phrase must come up twice</p>`)
+      + `</section>`;
+  }
   function bsMadeFrom(doc, mby, iby) {
     iby = iby || {};
     const pids = [];
@@ -5007,6 +5066,9 @@
     } else if (b.kind === "digest") {
       const it = iby[b.slug]; if (!it) return null;
       text = `what changed — ${it.name || b.slug}`; href = `${BASE}/i/${b.slug}`;
+    } else if (b.kind === "beside") {
+      const it = iby[b.slug]; if (!it) return null;
+      text = `said alongside — ${it.name || b.slug}`; href = `${BASE}/i/${b.slug}`;
     } else if (b.kind === "lead") {
       const m = mby[b.pid]; if (!m) return null;
       text = m.title || b.pid; href = `${BASE}/m/${b.pid}`;
@@ -5206,6 +5268,13 @@
         // the issue page's own label, carried: a model named this issue
         + (/^ai:/.test(String(it.name_origin || "")) ? ` · <span class="pb-origin">named by a model</span>` : "") + `</span>`
         + `</div></a>`;
+    }
+    if (b.kind === "beside") {
+      const it = iby[b.slug];
+      if (!it) return tried.i.has(b.slug)
+        ? paperGone(`the words beside an issue (${b.slug})`)
+        : paperBudget("the words beside an issue");
+      return bsBesideBlock(it, b.slug);
     }
     if (b.kind === "reel") {
       const clips = b.clips.map(c => {
@@ -6112,6 +6181,7 @@
   const SHELF = [
     ["lead", "Lead story", "a meeting, its still, its moments"],
     ["over", "Over time", "a thread’s timeline"],
+    ["beside", "Said alongside", "the words in the same breath"],
     ["week", "This week", "meetings as cards"],
     ["threads", "Threads", "small multiples"],
     ["strip", "How they talked", "the lens strip"],
@@ -6136,7 +6206,7 @@
     const n = readPaper().blocks.length;
     const where = at == null ? n : Math.max(0, Math.min(n, at | 0));
     const slot = $(`.cz-edslot[data-at="${where}"]`, el);
-    if (kind === "lead" || kind === "over" || kind === "quote" || kind === "numbers") { if (slot) openEdAdd(slot, { pick: kind }); return; }
+    if (kind === "lead" || kind === "over" || kind === "quote" || kind === "numbers" || kind === "beside") { if (slot) openEdAdd(slot, { pick: kind }); return; }
     if (kind === "reel") return addReelToPaper(where);
     if (kind === "rolls") return addChartToPaper("votes", "", where);
     if (kind === "note") return addNoteToPaper(where);
@@ -6155,6 +6225,7 @@
     if (b.kind === "chart" && !b.name && b.slug && it(b.slug)) b = { ...b, name: it(b.slug) };
     if (b.kind === "chart" && !b.title && b.pid && mt(b.pid)) b = { ...b, title: mt(b.pid) };
     if (b.kind === "reading" && !b.title && !b.name) b = { ...b, title: b.pid ? mt(b.pid) : it(b.slug) };
+    if (b.kind === "beside" && !b.name && it(b.slug)) b = { ...b, name: it(b.slug) };
     if (BS_SCOPED.includes(b.kind) && !b.name) b = { ...b, name: b.who ? bsWhoName(b.who) : b.town ? bsTownName(b.town) : "" };
     return b.kind === "lead" ? `Lead story · ${who(b.title || b.pid)}`
       : b.kind === "story" && b.story === "meeting" ? `A meeting · ${who(b.title || b.pid)}`
@@ -6171,6 +6242,7 @@
       : b.kind === "quote" ? `A quote · ${hms(b.t)}${b.title ? " · " + who(b.title) : ""}`
       : b.kind === "doc" ? `A filing · ${who(b.title || b.doc)}`
       : b.kind === "digest" ? `What changed · ${who(b.name || b.slug)}`
+      : b.kind === "beside" ? `Said alongside · ${who(b.name || b.slug)}`
       : b.kind === "reading" ? `The record’s reading · ${who(b.title || b.name || b.pid || b.slug)}`
       : b.kind === "week" ? `This week${b.name ? " · " + who(b.name) : b.town ? " · " + b.town : ""}`
       : b.kind === "threads" ? `Threads${b.name ? " · " + who(b.name) : b.town ? " · " + b.town : ""}`
@@ -6603,6 +6675,7 @@
         else if (kind === "cl") addChartToPaper("ledger", ref, at);
         else if (kind === "cv") addChartToPaper("votes", ref, at);
         else if (kind === "a") addReadingToPaper(ref, at);
+        else if (kind === "be") addBesideToPaper(ref, at);
         else if (kind === "chart") addChartToPaper(ref, "", at);
         else if (kind === "note") addNoteToPaper(at);
         else if (kind === "reel") addReelToPaper(at);
@@ -6750,6 +6823,7 @@
     const pick = opts.pick || ""; slot.dataset.pick = pick;
     const PICK = { lead: ["the lead story — which meeting?", "a body, a month, a title…"],
       over: ["over time — which thread?", "an issue’s name…"],
+      beside: ["said alongside — which issue?", "an issue’s name…"],
       quote: ["a quote — a word said on the tape", "three characters or more of what was said…"],
       numbers: ["in numbers — which meeting or issue?", "a body, a month, an issue’s name…"] };
     const [label, ph] = PICK[pick] || ["find a meeting or an issue", "a body, a month, an issue’s name…"];
@@ -6770,6 +6844,7 @@
         ${!pick && clips.length ? quick("reel", "", `＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})`) : ""}
         ${pick ? "" : quick("pick", "lead", "★ a lead story")}
         ${pick ? "" : quick("pick", "over", "◈ over time")}
+        ${pick ? "" : quick("pick", "beside", "◇ said alongside")}
         ${pick ? "" : quick("bs", "week", "▦ this week")}
         ${pick ? "" : quick("bs", "threads", "⟁ threads")}
         ${pick ? "" : quick("bs", "strip", "▤ how they talked")}
@@ -6919,7 +6994,7 @@
     const terms = lexTerms(q.value);
     const pick = slot.dataset.pick || "";
     const is = pick === "lead" || pick === "quote" ? [] : lexRank(terms, idx.issues).slice(0, 5);
-    const ms = pick === "over" || pick === "quote" ? [] : lexRank(terms, idx.meetings).slice(0, 5);
+    const ms = pick === "over" || pick === "quote" || pick === "beside" ? [] : lexRank(terms, idx.meetings).slice(0, 5);
     const p = readPaper();
     const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
     if (idx.dark.m && idx.dark.i) {
@@ -6935,7 +7010,8 @@
     // hits paint at once; the tape's lines (C2 — a bigger plane) land after
     const gen = slot._edgen = (slot._edgen || 0) + 1;
     const countLine = ls => (is.length || ms.length || ls.length)
-      ? (pick === "quote" ? "" : `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}`)
+      ? (pick === "quote" ? "" : (pick === "over" || pick === "beside") ? n(is.length, "issue", "issues")
+          : `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}`)
         + (ls.length ? `${pick === "quote" ? "" : " · "}${n(ls.length, "line", "lines")}` : "") + (terms.length ? " match" : "") + dark
       : `no match${dark}`;
     // no verdict while the tape's lines are still being read — a "no match"
@@ -6945,7 +7021,7 @@
     const linesOK = terms.length > 0 && q.value.trim().length >= 3;
     // a shelf pick for a meeting, a thread or a count reads the index alone
     // (never the tape's lines); the quote pick reads the lines alone
-    const indexPick = pick === "lead" || pick === "over" || pick === "numbers";
+    const indexPick = pick === "lead" || pick === "over" || pick === "numbers" || pick === "beside";
     if (count) count.textContent = (pick === "quote" && !linesOK) ? ""
       : (linesOK && !indexPick && !is.length && !ms.length) ? "searching the tape’s own lines…" : countLine([]);
     const hit = h => {
@@ -6958,6 +7034,8 @@
           ? `<button type="button" class="btn" data-czed="hit" data-kind="lead" data-ref="${esc(h.ref)}" aria-label="“${esc(h.title)}” as the lead story">★ lead story</button>`
           : pick === "over"
           ? `<button type="button" class="btn" data-czed="hit" data-kind="ci" data-ref="${esc(h.ref)}" aria-label="“${esc(h.title)}” over time — its timeline">◈ over time</button>`
+          : pick === "beside"
+          ? `<button type="button" class="btn" data-czed="hit" data-kind="be" data-ref="${esc(h.ref)}" aria-label="the words said alongside “${esc(h.title)}”">◇ said alongside</button>`
           : `<button type="button" class="btn" data-czed="hit" data-kind="cn" data-ref="${h.kind === "m" ? "m:" : "i:"}${esc(h.ref)}" aria-label="“${esc(h.title)}” in numbers">▤ in numbers</button>`}</span></div>`;
       return `<div class="cz-edhit">
         <span class="cz-edhit-t"><b>${esc(h.title)}</b><span class="cz-edhit-m">${esc(h.meta)}</span></span>
@@ -7632,7 +7710,7 @@
     if (SCOPE.pids.length && form && !$("#sq-scoped")) {
       const wide = new URL(location.href); wide.searchParams.delete("m");
       const line = document.createElement("p"); line.className = "hint sq-scoped"; line.id = "sq-scoped";
-      line.innerHTML = `searching inside the ${esc(tpN(SCOPE.pids.length, "meeting"))} a front page cites · <a href="${esc(wide.pathname + wide.search)}">search the whole record</a>`;
+      line.innerHTML = `searching inside the ${esc(tpN(SCOPE.pids.length, "meeting"))} this search is kept to · <a href="${esc(wide.pathname + wide.search)}">search the whole record</a>`;
       form.insertAdjacentElement("afterend", line);
     }
     // instant search: debounced, and never under three characters — a two-letter
@@ -7696,7 +7774,7 @@
     // filtered after, could say "nothing" over lines it never returned. Said
     // as a choice, never as a Studio that failed to answer (a skeptic's catch).
     if (SCOPE.pids.length) {
-      saySearchIsStatic("This search reads inside a front page’s own meetings, so it is counted from "
+      saySearchIsStatic("This search reads inside the meetings it was given, so it is counted from "
         + "the edition’s index in your browser — every line, exactly. Nothing was sent anywhere.");
       return staticSearch(q, terms, box);
     }
