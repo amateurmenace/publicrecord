@@ -841,7 +841,7 @@
     : b.kind === "digest" ? `⟳ what changed — ${b.name || b.slug} (${b.n})`
     : b.story === "issue" ? `◈ ${b.name || b.slug}`
     : b.kind === "beside" ? `◇ said alongside — ${b.name || b.slug}`
-    : b.kind === "reading" && b.slug ? `✎ the record’s reading — ${b.name || b.slug}`
+    : b.kind === "reading" ? `✎ the record’s reading — ${b.title || b.name || b.pid || b.slug}`
     : `§ ${b.title || b.pid}`;
   const blockLabelL = b => blockLabel(b) + (b.layout ? ` · ${LAYOUT_LABEL[b.layout]}` : "");
   function refreshPaperSummary(focus) {
@@ -4994,8 +4994,8 @@
     const chips = bsBesideChips(it.beside, pids);
     return `<section class="pb-beside"><span class="kicker">said alongside it — <a href="${BASE}/i/${esc(slug)}">${esc(it.name || slug)}</a></span>`
       + (chips
-        ? chips + `<p class="pb-say">counted in every line the record filed under the issue and the line either side; a phrase that is only the issue’s own name, or one of its other names, is left out; each opens the record’s search for the phrase within the issue’s own meetings</p>`
-        : `<p class="pb-say">nothing was said beside it often enough to count — a phrase must come up twice</p>`)
+        ? chips + `<p class="pb-say">counted in every line the record filed under the issue and the line either side; its own names are left out, and so is any other name the record does not already list — a name is known by its capitals, so one made only of everyday words can slip through, and a phrase with a word the record has rarely heard is held back too; each opens the record’s search for the phrase within the issue’s own meetings</p>`
+        : `<p class="pb-say">nothing said beside it can be counted — a phrase must come up twice, and one holding a name the record does not already list is held back</p>`)
       + `</section>`;
   }
   function bsMadeFrom(doc, mby, iby) {
