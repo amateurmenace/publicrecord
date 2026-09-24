@@ -76,8 +76,9 @@
   document.addEventListener("DOMContentLoaded", () => {
     initScope();
     initStudio();
-    wireStoryTabs();   // the front page's two stories, one at a time (specs/24)
-    if (/\/app\/m\//.test(path)) meeting();
+    wireStoryTabs();   // the front page's stories, one at a time (specs/24, /25)
+    hydrateTopicTicks();   // a topic story's chapters grow their cut ticks — on the front page and on the story's own page (specs/25)
+    if (/\/app\/m\//.test(path)) { meeting(); wireFind(); }
     else if (/\/app\/r$/.test(path)) reel();
     else if (/\/app\/p$/.test(path)) paper();
     else if (/\/app\/s$/.test(path)) search();
@@ -88,7 +89,197 @@
     else if (path === "/app") home();
     registerSW();
     wireSlashFocus();
+    wireKeys();   // ? — the keys sheet, on every page (specs/26 §2.5)
   });
+
+
+  /* ================= FIND IN THIS MEETING (specs/26 §2.2) ==================
+     Community Highlighter's search-within-a-video, in the paper: a find box
+     over the transcript, minted here (a pressed box that did nothing with
+     the script off would be the dishonesty the covenant is against). Whole-
+     word, case-blind, over the rows already on the page; the matching rows
+     stay, the rest fold away; a sparkline says where on the night the word
+     fell; ▶ plays the mentions as a reel; ✂ puts them on the tray. The word
+     cloud's words run it. Nothing leaves the browser. */
+  let MPF = null;
+  function wireFind() {
+    const tr = $("#transcript"); if (!tr) return;
+    const rows = $$("#transcript .seg"); if (!rows.length) return;
+    const host = $(".mp-words") || $(".tbar");
+    const form = document.createElement("form");
+    form.className = "mp-find"; form.setAttribute("role", "search");
+    form.innerHTML = `<input type="search" name="q" placeholder="find in this meeting — a word or phrase" aria-label="find in this meeting" autocomplete="off">
+      <button class="btn" type="submit">find</button>
+      <span class="mp-findn" aria-live="polite"></span>
+      <div class="mp-found" hidden></div>`;
+    if (host && host.classList.contains("mp-words")) host.insertBefore(form, host.firstChild.nextSibling);
+    else if (host) host.before(form);
+    else tr.before(form);
+    const input = $("input", form);
+    MPF = { rows, input, form, found: $(".mp-found", form), n: $(".mp-findn", form), q: "" };
+    form.addEventListener("submit", e => { e.preventDefault(); mpFind(input.value); });
+    let deb;
+    input.addEventListener("input", () => {
+      clearTimeout(deb);
+      const v = input.value.trim();
+      if (!v) { mpFind(""); return; }
+      if (v.length < 3) return;
+      deb = setTimeout(() => mpFind(v), 300);
+    });
+    input.addEventListener("keydown", e => { if (e.key === "Escape") { input.value = ""; mpFind(""); } });
+    // a word of the cloud finds every line that says it (its href — the
+    // first mention — stays the answer with the script off)
+    const cloud = $(".mp-words svg");
+    if (cloud) cloud.addEventListener("click", e => {
+      const a = e.target.closest("a"); if (!a) return;
+      // the word is the <text>'s own first text node — its <title> child
+      // (the tooltip) is not the word (a pane catch)
+      const tx = a.querySelector("text");
+      const w = tx && tx.firstChild && tx.firstChild.nodeType === 3 ? tx.firstChild.nodeValue : "";
+      if (!w.trim()) return;
+      e.preventDefault(); input.value = w.trim(); mpFind(w.trim());
+      input.scrollIntoView({ block: "nearest" });
+    });
+    // a link into the tape while the transcript is folded: the row it names
+    // must show, or the jump lands on nothing
+    window.addEventListener("hashchange", () => { if (tr.classList.contains("mp-finding")) mpReveal(); });
+  }
+  function mpReveal() {
+    const m = /^#t(\d+)$/.exec(location.hash); if (!m) return;
+    const row = document.getElementById("t" + m[1]);
+    if (!row) return;
+    // reveal, then land: the page's own focusHash ran first, on a row that
+    // was still folded away (a review catch)
+    row.classList.add("mp-hit");
+    row.scrollIntoView({ block: "center" });
+  }
+  function mpFind(q) {
+    if (!MPF) return;
+    const tr = $("#transcript"), { rows, found, n } = MPF;
+    q = String(q || "").trim();
+    MPF.q = q;
+    if (!q) {
+      tr.classList.remove("mp-finding");
+      for (const r of rows) r.classList.remove("mp-hit");
+      found.hidden = true; found.innerHTML = ""; n.textContent = "";
+      return;
+    }
+    const pats = [phraseRe(q)];
+    const hits = [];
+    for (const r of rows) {
+      const text = (r.querySelector(".sx") || r).textContent || "";
+      const k = mentionsIn(text, "", pats);
+      r.classList.toggle("mp-hit", k > 0);
+      if (k > 0) hits.push({ t: +r.dataset.t || 0, text, mentions: k, row: r });
+    }
+    if (!hits.length) {
+      // a miss keeps the transcript whole — folding everything away would
+      // hide the way back (a review catch)
+      tr.classList.remove("mp-finding");
+      n.textContent = `nothing in this meeting says “${q}”`;
+      found.hidden = true; found.innerHTML = "";
+      return;
+    }
+    tr.classList.add("mp-finding");
+    const total = hits.reduce((a, h) => a + h.mentions, 0);
+    n.textContent = `${tpN(hits.length, "line")} · ${tpN(total, "mention")}`;
+    // where it fell: 48 slices of the tape, each a seek
+    const last = rows[rows.length - 1];
+    const dur = Math.max(1, (CREEL && CREEL.meta && +CREEL.meta.duration) || 0, (+last.dataset.t || 0) + 5, ...hits.map(h => h.t + 1));
+    const bins = new Array(TP_BINS).fill(0);
+    for (const h of hits) bins[Math.min(TP_BINS - 1, Math.floor(TP_BINS * h.t / dur))]++;
+    const mx = Math.max(1, ...bins);
+    const bars = bins.map((c, i) => `<a class="fp-sbar" href="#t${Math.floor(dur * i / TP_BINS)}" title="${hms(dur * i / TP_BINS)}–${hms(dur * (i + 1) / TP_BINS)}: ${tpN(c, "line")}"><i style="height:${c ? 2 + Math.round(20 * c / mx) : 1}px"></i></a>`).join("");
+    // the mentions as clips: each line and the twelve seconds after it —
+    // the sentence, not the caption line — runs merged, never past the
+    // tape: the tray's own rule for a hit, the search page's and the
+    // supercut's (a line alone is four seconds; a reel of those is a jolt)
+    const pid = ($(".meeting") || {}).dataset ? $(".meeting").dataset.pid : "";
+    const clips = tpMerge(hits.map(h => ({ pid, t: h.t })), dur);
+    MPF.clips = clips; MPF.hits = hits;
+    const rt = clips.reduce((a, c) => a + (c.end - c.start), 0);
+    found.hidden = false;
+    found.innerHTML = `<div class="fp-sparks"><div class="fp-spark"><span class="fp-sterm">where it fell</span><span class="fp-sbars">${bars}</span><span class="fp-sn">${tpN(hits.length, "line")}</span></div></div>
+      <div class="sq-acts">
+        <a class="btn primary tp-play" href="${esc(reelShareURL(clips))}">▶ play the ${tpN(clips.length, "clip")} as a reel · ${hms(rt)}</a>
+        <button type="button" class="btn" data-mp="tray">✂ put them on my tray</button>
+        <button type="button" class="btn" data-mp="clear">show the whole transcript</button>
+      </div>
+      <p class="hint">the lines that say “${esc(q)}” stay below, the rest fold away; every bar above opens the tape there</p>`;
+    $("[data-mp=tray]", found).onclick = () => mpTray();
+    $("[data-mp=clear]", found).onclick = () => { MPF.input.value = ""; mpFind(""); MPF.input.focus(); };
+    $$(".fp-sbar", found).forEach(a => a.addEventListener("click", ev => {
+      ev.preventDefault(); const t = +a.getAttribute("href").slice(2);
+      const f = $(".player.facade"); if (f) loadTape(f.dataset.video, t); else ytSeek(t);
+    }));
+  }
+  async function mpTray() {
+    if (!MPF || !MPF.clips || !MPF.clips.length) return;
+    const pid = ($(".meeting") || {}).dataset ? $(".meeting").dataset.pid : "";
+    // the meeting's own facts (the tape, its length, the day) — from the
+    // composer once the plane has landed, else the same cached fetch, so a
+    // press before it lands never stores a tapeless clip (a review catch)
+    let meta = CREEL ? CREEL.meta : null;
+    if (!meta) {
+      const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`) || {};
+      meta = { video_id: m.video_id || "", title: m.title || "", body: m.body || "",
+               town: m.town || "", date: m.date || "", duration: +m.duration || 0 };
+    }
+    const clips = MPF.clips.map(c => {
+      const h = MPF.hits.find(h => h.t === c.start) || {};
+      return { pid, start: r1(c.start), end: r1(c.end), t: r1(c.start), kind: "segment",
+        quote: cut(String(h.text || "").trim(), 120), video_id: meta.video_id || "", mtitle: meta.title || "",
+        body: meta.body || "", town: meta.town || "", date: meta.date || "", duration: +meta.duration || 0 };
+    });
+    const have = trayClips();
+    const next = takeMerge("append", have, clips, true);
+    const added = next.length - have.length;
+    writeTray(next);
+    toast(added ? `${tpN(added, "clip")} on your tray — ${next.length} in all` : "every one of these was on your tray already");
+  }
+
+  /* ================= THE KEYS — ? (specs/26 §2.5) ==========================
+     One sheet, on every page, that says what the keyboard does here — the
+     Highlighter's shortcuts overlay, in the paper. Script-built, opened by
+     ?, closed by Esc or its button; a <dialog>, so focus and the backdrop
+     are the browser's. It lists only keys this page answers. */
+  function keysFor() {
+    const p = path;   // the page's path as the router reads it (/app/s/ is the search page too)
+    const rows = [["/", "search the record" + ($(".mp-find") ? " — here, find in this meeting" : "")], ["?", "this sheet"], ["Esc", "close it"]];
+    if (/\/app\/s$/.test(p)) rows.push(["j · k", "walk the hits"], ["Enter", "open the tape at the hit"], ["c", "cut the hit under the cursor into your reel"]);
+    if (/\/app\/m\//.test(p) && $("#transcript .seg")) rows.push(["c", "cut the transcript line under the cursor (Tab to its time, then c)"]);
+    if ($(".mp-find")) rows.push(["Esc", "in the find box, show the whole transcript"]);
+    if (/\/app\/r$/.test(p)) rows.push(["Space", "play or pause the reel"], ["← · →", "the previous or next clip"]);
+    if ($(".cz-modebar")) rows.push(["← · →", "Read or Edit, in the mode bar"]);
+    return rows;
+  }
+  function wireKeys() {
+    if (typeof HTMLDialogElement === "undefined") return;   // no <dialog>: the keys still work, the sheet does not
+    document.addEventListener("keydown", e => {
+      if (e.key !== "?" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || (e.target.isContentEditable)) return;
+      e.preventDefault();
+      let d = $(".kb-sheet");
+      if (d && d.open) { d.close(); return; }   // ? again closes it (a review catch)
+      if (!d) {
+        d = document.createElement("dialog"); d.className = "kb-sheet";
+        d.setAttribute("aria-label", "the keys");
+        // a press on the backdrop closes it — the backdrop, not the sheet's own padding
+        d.addEventListener("click", ev => {
+          const r = d.getBoundingClientRect();
+          if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) d.close();
+        });
+        document.body.appendChild(d);
+      }
+      d.innerHTML = `<span class="kicker">the keys — what the keyboard does on this page</span>
+        <dl class="kb-list">${keysFor().map(([k, what]) => `<dt><kbd>${esc(k)}</kbd></dt><dd>${esc(what)}</dd>`).join("")}</dl>
+        <p class="hint">Every key is a shortcut for something a pointer can do; nothing here needs it.</p>
+        <button type="button" class="btn kb-close">close</button>`;
+      $(".kb-close", d).onclick = () => d.close();
+      d.showModal();
+    });
+  }
 
   /* `/` focuses the search field from any page — the field on this page if
      there is one (front page, search page), otherwise a jump to search. */
@@ -373,12 +564,17 @@
   function wireStoryTabs() {
     const nav = $(".stab"); if (!nav) return;
     const tabs = $$(".stab-a", nav);
-    const stories = { "over-time": $("#over-time"), latest: $("#latest") };
-    if (!tabs.length || !stories["over-time"] || !stories.latest) return;
+    // every story the strip names (specs/25 adds a topic story, first):
+    // the strip is the truth, so a tab without its story is simply not a tab
+    const stories = Object.create(null);   // no prototype: "#constructor" is not a story (a review catch)
+    for (const t of tabs) { const k = t.dataset.story, el = k && $("#" + CSS.escape(k)); if (el) stories[k] = el; }
+    const keys = Object.keys(stories);
+    if (keys.length < 2) return;
     document.documentElement.classList.add("js");
-    let want = "over-time";
-    try { const s = localStorage.getItem(STORY_KEY); if (s === "latest") want = s; } catch { /* private mode */ }
-    if (location.hash === "#latest") want = "latest"; else if (location.hash === "#over-time") want = "over-time";
+    let want = keys[0];
+    try { const s = localStorage.getItem(STORY_KEY); if (s && stories[s]) want = s; } catch { /* private mode */ }
+    const h = location.hash.slice(1);
+    if (h && stories[h]) want = h;
     // the toggle hides by its own class, on the story's make-wrapper when
     // the studio has wrapped it — never by `hidden`, which the town scope
     // paints on every card with a data-town and would show the latest
@@ -1621,6 +1817,11 @@
     if (d.info && typeof d.info.playerState === "number" && d.info.playerState !== YT.state) {
       YT.state = d.info.playerState;
       if (YT.state === 0 || YT.state === 2 || YT.state === 5) YT.hold = false;   // seen silent
+      // a pause pressed in the frame itself, mid-clip: the transport says so
+      // — controls describe the painted state, and the tape is the state
+      if (YT.state === 2 && REELPLAY && REELPLAY.active && REELPLAY.armed && !REELPLAY.settling && !REELPLAY.paused) {
+        REELPLAY.active = false; REELPLAY.userPaused = true; reelShow();
+      }
       else if (YT.state === 1) {
         // held silent and not yet seen so: a play with no reader's hand in
         // it is an autoplay landing late — silenced again
@@ -1630,8 +1831,8 @@
           // stage yields, and a reel the stage paused goes on from its clip
           YT.hold = false;
           if (PV.clip || PV.free) pvPause();
-          if (REELPLAY && REELPLAY.paused) {
-            REELPLAY.paused = false; REELPLAY.active = true; REELPLAY.armed = false;
+          if (REELPLAY && (REELPLAY.paused || REELPLAY.userPaused)) {
+            REELPLAY.paused = false; REELPLAY.userPaused = false; REELPLAY.active = true; REELPLAY.armed = false;
             // on from its clip: where the frame stands inside it; from its
             // start when the frame stands before it; on to the next clip when
             // the frame already stands at its end (the gate never saw it)
@@ -2495,6 +2696,10 @@
         + '</p></div>';
     }
     REELPLAY = { clips, i: 0, active: false, armed: false, vid: v0, now: $("#reelnow") };
+    // the transport (specs/25 §2.5): prev · play/pause · next, the clip
+    // counter, and one segment per clip — the bar fills as the tape plays.
+    // Built once the viewer's state stands (it reads and writes REELPLAY).
+    if (v0) { stage.insertAdjacentHTML("beforeend", rpBar(clips)); wireReelBar(stage, clips); }
     const nmeet = reelPids(clips).length;
     const head = `<div class="sectionhead"><span class="kicker">the reel — `
       + `${clips.length} moment${clips.length > 1 ? "s" : ""} `
@@ -2519,6 +2724,7 @@
       + (where ? `<p class="rc-where">${esc(where)}</p>` : "")
       + `<div class="rt-btns">
           <button class="btn primary" type="button" data-rv="mine">✂ make this reel yours</button>
+          <button class="btn" type="button" data-rv="share">⧉ share the reel</button>
           <button class="btn" type="button" data-rv="cite">⧉ Copy cite sheet</button>
           ${multi ? "" : '<button class="btn" type="button" data-rv="json">⬇ reel.json</button>'}
           ${multi ? "" : `<a class="btn" href="${BASE}/m/${esc(vmeta.pid)}">open the meeting →</a>`}</div>
@@ -2543,16 +2749,20 @@
     $$("[data-rv]", cites).forEach(b => b.onclick = () =>
       b.dataset.rv === "cite" ? copyText(citeSheet(vmeta, clips), "cite sheet copied")
       : b.dataset.rv === "json" ? downloadReel(vmeta, clips)
+      : b.dataset.rv === "share" ? rpShare()
       : takeReel(mine(), $("#rvtake", cites)));
     // clicking a cite while the reel plays jumps to that clip (switching the tape
     // when the clip is from another meeting); a tape-less clip just follows its
     // deep link, and so does any click when the reel isn't playing
     $$(".reelcite", cites).forEach(a => a.addEventListener("click", ev => {
       const i = +a.dataset.i, c = REELPLAY.clips[i];
-      // a reel the stage paused resumes from the clip pressed
-      if (REELPLAY.paused && c.video_id) {
+      // a reel the stage paused — or the transport, or the frame's own
+      // pause button — goes on from the clip pressed (a re-review catch: the
+      // transport's pause turned every cite into an exit)
+      if ((REELPLAY.paused || REELPLAY.userPaused) && c.video_id) {
         ev.preventDefault(); pvPause();
-        REELPLAY.paused = false; REELPLAY.active = true; REELPLAY.i = i; REELPLAY.armed = false;
+        REELPLAY.paused = false; REELPLAY.userPaused = false; REELPLAY.done = false;
+        REELPLAY.active = true; REELPLAY.i = i; REELPLAY.armed = false;
         reelSeek(c); reelShow(); return;
       }
       if (!REELPLAY.active || !c.video_id) return;
@@ -2624,17 +2834,133 @@
     if (box) box.innerHTML = `on <b>your</b> tray now — ${next.length} clip${next.length > 1 ? "s" : ""}; open the studio to re-cut`;
     land();
   }
+  /* ---- the transport bar (specs/25 §2.5) — the Highlighter's reel player,
+     in the paper: prev/play/next, "clip 3 of 9 · 0:31 / 1:36", a segmented
+     bar (one segment per clip, sized by its length) that fills with the
+     tape's own time reports, and the share row. Paints the reel as it
+     stands — never a timer pretending to be the tape. */
+  function rpBar(clips) {
+    const total = reelRuntime(clips) || 1;
+    const segs = clips.map((c, i) => `<button type="button" class="rp-seg" data-i="${i}" style="flex:${Math.max(1, clipLen(c))}"
+      title="clip ${i + 1} · ${hms(c.start)} · ${esc(cut(c.quote || c.kind || "", 80))}" aria-label="go to clip ${i + 1} of ${clips.length}"><i></i></button>`).join("");
+    return `<div class="rp-bar" role="group" aria-label="the reel’s transport">
+        <button type="button" class="rp-btn" data-rp="prev" aria-label="previous clip" disabled>◀</button>
+        <button type="button" class="rp-btn rp-play" data-rp="toggle" aria-label="play the reel">▶ play</button>
+        <button type="button" class="rp-btn" data-rp="next" aria-label="next clip"${clips.length > 1 ? "" : " disabled"}>▶|</button>
+        <span class="rp-count" id="rpcount" aria-live="off">${clips.length} clip${clips.length > 1 ? "s" : ""} · ${hms(total)}</span>
+      </div>
+      <div class="rp-prog" role="group" aria-label="where the reel stands, clip by clip">${segs}</div>`;
+  }
+  function wireReelBar(stage, clips) {
+    $$("[data-rp]", stage).forEach(b => b.addEventListener("click", () => {
+      const k = b.dataset.rp;
+      if (k === "toggle") rpToggle(clips);
+      else rpStep(clips, k === "next" ? 1 : -1);
+    }));
+    $$(".rp-seg", stage).forEach(b => b.addEventListener("click", () => rpJump(clips, +b.dataset.i)));
+    if (!REELPLAY.keys) {
+      REELPLAY.keys = true;
+      document.addEventListener("keydown", e => {
+        // the keys are the page's, never a control's: a link, a summary,
+        // a button or a field keeps its own Space and arrows; a held key
+        // does not step or toggle again
+        if (!REELPLAY || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+        if (e.target && e.target.closest && e.target.closest("input, textarea, select, button, a, summary, [contenteditable]")) return;
+        if (e.key === " ") { e.preventDefault(); rpToggle(REELPLAY.clips); }
+        else if (e.key === "ArrowRight") { e.preventDefault(); rpStep(REELPLAY.clips, 1); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); rpStep(REELPLAY.clips, -1); }
+      });
+    }
+  }
+  /* play from the start, pause the tape, or go on from where it stands */
+  function rpToggle(clips) {
+    if (!REELPLAY) return;
+    if (!REELPLAY.started) { startReel(clips); return; }
+    if (REELPLAY.active) {
+      REELPLAY.active = false; REELPLAY.userPaused = true;
+      // a pause pressed while the tape is still loading: the autoplay that
+      // lands later is held silent, and the reader's ▶ lets it go
+      if (!YT.ready) YT.hold = true;
+      ytSend("cmd", "pauseVideo", []); reelShow(); return;
+    }
+    if (REELPLAY.done) { rpJump(clips, clips.findIndex(c => c.video_id)); return; }
+    pvPause(); YT.hold = false;   // one engine seeks (specs/23 B2): a resume is the page's play
+    REELPLAY.userPaused = false; REELPLAY.paused = false; REELPLAY.active = true;
+    ytSend("cmd", "playVideo", []); reelShow();
+  }
+  function rpStep(clips, d) {
+    if (!REELPLAY) return;
+    let i = (REELPLAY.started ? REELPLAY.i : -1) + d;
+    while (i >= 0 && i < clips.length && !clips[i].video_id) i += d;
+    if (i < 0 || i >= clips.length) return;
+    rpJump(clips, i);
+  }
+  function rpJump(clips, i) {
+    const c = clips[i]; if (!c || !c.video_id) return;
+    if (!REELPLAY.started) { REELPLAY.startAt = i; startReel(clips); return; }
+    pvPause();
+    REELPLAY.done = false; REELPLAY.paused = false; REELPLAY.userPaused = false;
+    REELPLAY.active = true; REELPLAY.i = i; REELPLAY.armed = false;
+    reelSeek(c); reelShow();
+  }
+  /* the fill: how far into the reel the tape stands — the clips before
+     this one, whole, plus the way into this one */
+  function rpPaint(t) {
+    if (!REELPLAY || !REELPLAY.started) return;
+    const clips = REELPLAY.clips, i = REELPLAY.i, c = clips[i];
+    const segs = $$(".rp-seg");
+    let before = 0;
+    segs.forEach((s, j) => {
+      s.classList.toggle("done", j < i || (REELPLAY.done && j <= i));
+      s.classList.toggle("on", j === i && !REELPLAY.done);
+      const fill = $("i", s);
+      if (fill) fill.style.width = j === i && !REELPLAY.done && c
+        ? `${Math.round(100 * Math.max(0, Math.min(1, (t - c.start) / Math.max(0.1, clipLen(c)))))}%` : "0";
+      if (j < i) before += clipLen(clips[j]);
+    });
+    const count = $("#rpcount");
+    if (count && c) {
+      const into = REELPLAY.done ? reelRuntime(clips) : before + Math.max(0, Math.min(clipLen(c), t - c.start));
+      count.textContent = `clip ${i + 1} of ${clips.length} · ${hms(into)} / ${hms(reelRuntime(clips))}`;
+    }
+  }
+  function rpState() {
+    if (!REELPLAY) return;
+    const play = $("[data-rp=toggle]"), prev = $("[data-rp=prev]"), next = $("[data-rp=next]");
+    const playing = REELPLAY.active && !REELPLAY.paused;
+    if (play) {
+      play.textContent = playing ? "❚❚ pause" : REELPLAY.done ? "↺ replay" : REELPLAY.started ? "▶ go on" : "▶ play";
+      play.setAttribute("aria-label", playing ? "pause the reel" : REELPLAY.done ? "play the reel again" : REELPLAY.started ? "go on with the reel" : "play the reel");
+    }
+    const clips = REELPLAY.clips, i = REELPLAY.started ? REELPLAY.i : -1;
+    if (prev) prev.disabled = !clips.slice(0, Math.max(0, i)).some(c => c.video_id);
+    if (next) next.disabled = !clips.slice(i + 1).some(c => c.video_id);
+    rpPaint(typeof YT !== "undefined" && YT.time != null ? YT.time : (clips[Math.max(0, i)] || {}).start || 0);
+  }
+  /* the end card's share row — the link is the reel; the share sheet is the
+     reader's own device's, when it has one; nothing else is called */
+  function rpShare() {
+    const url = location.href;
+    if (navigator.share) {
+      navigator.share({ title: document.title, url }).catch(() => { /* the reader closed the sheet */ });
+      return;
+    }
+    copyText(url, "reel link copied — send it anywhere");
+  }
   function startReel(clips) {
     pvPause();   // one engine seeks (specs/23 B2)
-    REELPLAY.paused = false;
+    REELPLAY.paused = false; REELPLAY.userPaused = false; REELPLAY.done = false;
     // begin at the first clip that has a tape — a reel that opens on an
     // audio-only meeting still plays its later, playable clips
-    let i = 0; while (i < clips.length && !clips[i].video_id) i++;
+    let i = REELPLAY.startAt || 0; REELPLAY.startAt = 0;   // a segment pressed before play starts there
+    while (i < clips.length && !clips[i].video_id) i++;
     if (i >= clips.length) return;
-    REELPLAY.i = i; REELPLAY.active = true; REELPLAY.armed = false;
+    REELPLAY.i = i; REELPLAY.active = true; REELPLAY.armed = false; REELPLAY.started = true;
     REELPLAY.vid = clips[i].video_id;
     const f = $(".player.facade");
-    if (f) loadTape(f.dataset.video, clips[i].start); else ytSeek(clips[i].start);
+    // the clip's own tape — a segment pressed before play on a reel across
+    // meetings starts its meeting, not the facade's (a re-review catch)
+    if (f) loadTape(clips[i].video_id, clips[i].start); else ytSeek(clips[i].start);
     reelShow();
   }
   /* seek within the current tape, or — when the clip is from another meeting —
@@ -2677,7 +3003,9 @@
      watches that clip's end, so a stale time report can't skip a clip. While a
      cross-meeting tape switch settles, reports are ignored entirely. */
   function reelAdvance(t) {
-    if (!REELPLAY || !REELPLAY.active || REELPLAY.settling) return;
+    if (!REELPLAY || REELPLAY.settling) return;
+    if (REELPLAY.started) rpPaint(t);
+    if (!REELPLAY.active) return;
     const c = REELPLAY.clips[REELPLAY.i]; if (!c) return;
     if (!REELPLAY.armed) {
       // arm only on a report that lands inside the clip and BEFORE its end
@@ -2698,7 +3026,7 @@
     if (n < REELPLAY.clips.length) {
       REELPLAY.i = n; reelSeek(REELPLAY.clips[n]); reelShow();
     } else {
-      REELPLAY.active = false; ytSend("cmd", "pauseVideo", []); reelShow(true);
+      REELPLAY.active = false; REELPLAY.done = true; ytSend("cmd", "pauseVideo", []); reelShow(true);
     }
   }
   function reelShow(done) {
@@ -2707,18 +3035,30 @@
     // when the reel spans meetings, name each clip's meeting as it plays
     const from = (c && c.mtitle && reelPids(REELPLAY.clips).length > 1)
       ? ` <span class="rn-from">${esc(c.mtitle)}</span>` : "";
+    const done_ = done || REELPLAY.done;
     if (now) {
       now.hidden = false;
       now.innerHTML = REELPLAY.paused && c
         ? `<b>paused for the preview</b> — tap a clip below to go on from it`
-        : (done || !c)
+        : (done_ || !c)
         ? `<b>reel complete</b> — ${REELPLAY.clips.length} clip${REELPLAY.clips.length > 1 ? "s" : ""} played`
-        : `<span class="rn-ord">clip ${REELPLAY.i + 1} of ${REELPLAY.clips.length}</span>`
+          + `<span class="rp-end"><button type="button" class="btn" data-rpend="replay">↺ play it again</button>`
+          + `<button type="button" class="btn" data-rpend="share">⧉ share the reel</button>`
+          + `<button type="button" class="btn primary" data-rpend="mine">✂ make this reel yours</button></span>`
+        : (REELPLAY.userPaused ? `<b>paused</b> — ` : "")
+          + `<span class="rn-ord">clip ${REELPLAY.i + 1} of ${REELPLAY.clips.length}</span>`
           + `<span class="ts">${hms(c.start)}</span> `
-          + `<span class="rn-quote">${esc(c.quote || c.kind || "")}</span>${from}`;
+          + `<span class="rn-quote">${esc(c.quote || c.kind || "")}</span>${from}`
+          + (c.date || c.body ? ` <span class="rn-from">${esc([c.body, c.date].filter(Boolean).join(", "))}</span>` : "");
+      $$("[data-rpend]", now).forEach(b => b.onclick = () => {
+        if (b.dataset.rpend === "replay") rpJump(REELPLAY.clips, REELPLAY.clips.findIndex(c => c.video_id));
+        else if (b.dataset.rpend === "share") rpShare();
+        else { const m = $("[data-rv=mine]"); if (m) m.click(); }
+      });
     }
     $$(".reelcite").forEach((a, i) =>
-      a.classList.toggle("on", REELPLAY.active && i === REELPLAY.i));
+      a.classList.toggle("on", REELPLAY.started && !done_ && i === REELPLAY.i));
+    rpState();
   }
   function reelMessage(el, html) {
     if (el) el.innerHTML = `<p class="hint">${html}</p>`;
@@ -5397,6 +5737,419 @@
   }
 
   /* ================= SEARCH ================= */
+
+  /* ================= A WORD, OVER TIME — the search, told as a story (specs/25) ==
+     The JS twin of web/topic.py: the same counts over the same lines, drawn
+     with the same classes, live for any word a reader types. The pure half
+     first — tpAggregate answers exactly what the press's aggregate() answers
+     on the same (meetings, hits), and the node twin test holds it so — the
+     DOM after. Nothing here leaves the browser: the index is the record's
+     own static planes, the reel is a link, the tray is localStorage. */
+  const TP_WINDOW = 12, TP_CAP = 90, TP_BINS = 48;
+  const TP_FLOOR_LINES = 3, TP_FLOOR_MEETINGS = 2;
+  /* whole-word, case-blind — the press's phrase_re; no lookbehind, so an
+     older browser still parses it (the prefix group is consumed, and the
+     phrase's own start is index + prefix length) */
+  const phraseRe = p => new RegExp("(^|[^a-z0-9])" + String(p).toLowerCase()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![a-z0-9])", "g");
+  /* a caption line is short and a phrase can break across two — the line is
+     read with the next joined on, and only a match that STARTS inside the
+     line counts for it (the press's mentions_in) */
+  function mentionsIn(text, after, pats) {
+    const t = String(text || "").toLowerCase();
+    const joined = t + " " + String(after || "").toLowerCase();
+    let n = 0;
+    for (const p of pats) {
+      p.lastIndex = 0; let m;
+      while ((m = p.exec(joined))) {
+        if (m.index + m[1].length <= t.length) n++;
+        if (m[0].length === 0) p.lastIndex++;
+      }
+    }
+    return n;
+  }
+  const TP_MONTH = /^\d{4}-(0[1-9]|1[0-2])/, TP_DAY = /^\d{4}-\d{2}-\d{2}/;
+  const tpIsMonth = d => TP_MONTH.test(String(d || ""));
+  const tpMonthRange = months => {
+    const ms = months.filter(tpIsMonth).map(m => String(m).slice(0, 7)).sort();
+    if (!ms.length) return [];
+    let y = +ms[0].slice(0, 4), mo = +ms[0].slice(5, 7);
+    const y1 = +ms[ms.length - 1].slice(0, 4), mo1 = +ms[ms.length - 1].slice(5, 7);
+    const out = [];
+    while (y < y1 || (y === y1 && mo <= mo1)) {
+      out.push(`${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}`);
+      if (++mo > 12) { y++; mo = 1; }
+    }
+    return out;
+  };
+  const tpCutWords = (s, n) => {
+    s = String(s || "").split(/\s+/).join(" ").trim();
+    if (s.length <= n) return s;
+    let head = s.slice(0, n);
+    if (head.includes(" ")) head = head.slice(0, head.lastIndexOf(" "));
+    return head.replace(/[,;:—-]+$/, "") + "…";
+  };
+  const tpContext = (h, n) => tpCutWords([h.before, h.text, h.after].filter(Boolean)
+    .map(x => String(x).split(/\s+/).join(" ")).join(" "), n || 220);
+  /* each hit is a clip of its line and the twelve seconds after it; hits that
+     fall inside the clip before them extend it, up to the cap — the press's
+     merge_windows, so the pressed supercut and the live one are one cut */
+  function tpMerge(hits, duration) {
+    const dur = +duration || 0, out = [];
+    for (const h of hits.slice().sort((a, b) => a.t - b.t)) {
+      const t = +h.t; let end = t + TP_WINDOW;
+      if (dur) end = Math.min(end, dur);
+      const last = out[out.length - 1];
+      if (last && t <= last.end && (end - last.start) <= TP_CAP) { last.end = Math.max(last.end, end); last.n++; continue; }
+      if (end <= t) continue;
+      out.push({ pid: h.pid, start: t, end, n: 1 });
+    }
+    return out;
+  }
+  const TP_STOP = new Set(("a about above after again against all am an and any are as at be because been before being below between both but by could did do does doing down during each few for from further had has have having he her here hers herself him himself his how i if in into is it its itself just me more most my myself no nor not now of off on once only or other our ours ourselves out over own same she should so some such than that the their theirs them themselves then there these they this those through to too under until up very was we were what when where which while who whom why will with you your yours yourself yourselves would can may might must shall going go get got know think say said says see right okay ok yeah yes um uh like well really just actually also one two three want make made need look looking thing things time way lot bit dont don didnt cant wont let lets us thank thanks gonna kind sort mr mrs ms dr item items next new motion second meeting board committee town public comment agenda minutes vote member members chair year percent question questions").split(" "));
+  const TP_ART = new Set(["applause", "clears throat", "council president", "councilor", "crosstalk", "everybody", "everyone", "foreign", "good afternoon", "good evening", "good morning", "good night", "hello", "inaudible", "laughter", "madam chair", "madam clerk", "madam mayor", "madam president", "mhm", "mister president", "mr chair", "mr clerk", "mr mayor", "mr president", "music", "next slide", "okay", "point of order", "roll call", "silence", "thank you", "thanks", "uh", "um", "welcome", "yeah"]);
+  const tpStopish = w => {
+    if (TP_STOP.has(w) || w.length < 3) return true;
+    if (w.includes("'")) { const b = w.split("'")[0]; return TP_STOP.has(b) || b.length < 4; }
+    return false;
+  };
+  function tpCowords(hits, phrases, top) {
+    const skip = new Set();
+    for (const p of phrases) for (const w of (String(p).toLowerCase().match(/[a-z][a-z'’-]+/g) || [])) skip.add(w);
+    const counts = Object.create(null);
+    for (const h of hits) {
+      const text = [h.before || "", h.text || "", h.after || ""].join(" ").toLowerCase();
+      for (let w of (text.match(/[a-z][a-z'’-]+/g) || [])) {
+        w = w.replace(/^['’-]+|['’-]+$/g, "");
+        if (!w || skip.has(w) || tpStopish(w) || TP_ART.has(w)) continue;
+        counts[w] = (counts[w] || 0) + 1;
+      }
+    }
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || (a < b ? -1 : a > b ? 1 : 0))
+      .slice(0, top || 12).filter(w => counts[w] > 1).map(w => ({ word: w, count: counts[w] }));
+  }
+  /* the count — pure over (meetings, hits); the press's aggregate() twin.
+     `town` pins the story to one town (the reader's scope); otherwise the
+     town with the most lines leads, the rest are counted as elsewhere. */
+  function tpAggregate(meetings, hits, topic, town, floor) {
+    const phrases = (topic.phrases || []).filter(p => String(p || "").trim());
+    // maps without a prototype: a pid or a town named "constructor" is data (a review catch)
+    const byPid = Object.create(null); for (const m of meetings) byPid[m.pid] = m;
+    const hitsBy = Object.create(null);
+    for (const h of hits.slice().sort((a, b) => (a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0) || a.t - b.t))
+      if (byPid[h.pid]) (hitsBy[h.pid] ||= []).push(h);
+    const pids = Object.keys(hitsBy);
+    if (!pids.length) return null;
+    const townLines = Object.create(null), townMeets = Object.create(null);
+    for (const pid of pids) { const tn = String(byPid[pid].town || "");
+      townLines[tn] = (townLines[tn] || 0) + hitsBy[pid].length; townMeets[tn] = (townMeets[tn] || 0) + 1; }
+    // a meeting with no town recorded never leads a story — it is counted
+    // as elsewhere, and named as what it is
+    const named = Object.keys(townLines).filter(t => t);
+    if (!town || !(town in townLines)) {
+      if (!named.length) return null;
+      town = named.sort((a, b) => townLines[b] - townLines[a] || townMeets[b] - townMeets[a] || (a < b ? -1 : a > b ? 1 : 0))[0];
+    }
+    if (floor !== false && (townLines[town] < TP_FLOOR_LINES || townMeets[town] < TP_FLOOR_MEETINGS)) return null;
+    // undated nights sort last: the first word on the record is a dated one
+    const dkey = m => tpIsMonth(m.date) ? String(m.date) : "9999-99-99";
+    const ms = meetings.filter(m => String(m.town || "") === town)
+      .sort((a, b) => (dkey(a) < dkey(b) ? -1 : dkey(a) > dkey(b) ? 1 : 0) || (a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0));
+    const rows = ms.map(m => {
+      const hs = hitsBy[m.pid] || [];
+      let dur = +m.duration || 0;
+      if (hs.length) dur = Math.max(dur, Math.max(...hs.map(h => h.t)) + 1);
+      const bins = new Array(TP_BINS).fill(0);
+      for (const h of hs) bins[Math.min(TP_BINS - 1, Math.floor(TP_BINS * h.t / dur))] += dur ? 1 : 0;
+      return { pid: m.pid, title: String(m.title || m.pid), date: String(m.date || ""), body: String(m.body || ""),
+               duration: dur, n: hs.length, mentions: hs.reduce((a, h) => a + (+h.mentions || 0), 0),
+               first_t: hs.length ? hs[0].t : null, last_t: hs.length ? hs[hs.length - 1].t : null,
+               bins, hits: hs, clips: tpMerge(hs, dur) };
+    });
+    const said = rows.filter(r => r.n);
+    const all = [].concat(...said.map(r => r.hits));
+    const dated = rows.filter(r => tpIsMonth(r.date));
+    const months = tpMonthRange(dated.map(r => r.date.slice(0, 7))).map(mo => {
+      const rs = dated.filter(r => r.date.slice(0, 7) === mo);
+      return { month: mo, meetings: rs.length, said: rs.filter(r => r.n).length,
+               moments: rs.reduce((a, r) => a + r.n, 0), mentions: rs.reduce((a, r) => a + r.mentions, 0) };
+    });
+    const bb = Object.create(null);
+    for (const r of said) { const k = r.body || "—";
+      const b = bb[k] ||= { body: k, moments: 0, meetings: 0, mentions: 0 };
+      b.moments += r.n; b.meetings++; b.mentions += r.mentions; }
+    const bodies = Object.values(bb).sort((a, b) => b.moments - a.moments || (a.body < b.body ? -1 : 1));
+    // "the latest" is a chronological claim: the last dated night that said
+    // it, when any night is dated (undated nights sort last, and cannot be it)
+    const datedSaid = said.filter(r => tpIsMonth(r.date));
+    const first = said[0], latest = datedSaid.length ? datedSaid[datedSaid.length - 1] : said[said.length - 1];
+    const peak = said.reduce((p, r) => (r.n > p.n || (r.n === p.n && r.date > p.date)) ? r : p, said[0]);
+    let gap = 0;
+    for (const r of rows.slice(rows.indexOf(first) + 1)) { if (r.n) break; gap++; }
+    const elsewhere = Object.keys(townLines).filter(t => t !== town)
+      .map(t => ({ town: t, moments: townLines[t], meetings: townMeets[t] }))
+      .sort((a, b) => b.moments - a.moments || (a.town < b.town ? -1 : 1));
+    const chapters = said.map(r => ({ pid: r.pid, date: r.date, body: r.body, title: r.title, n: r.n,
+      t: r.hits[0].t, quote: tpContext(r.hits[0]),
+      clip: { pid: r.pid, start: r.hits[0].t, end: r.clips.length ? r.clips[0].end : r.hits[0].t + TP_WINDOW } }));
+    const short = chapters.map(c => c.clip), full = [].concat(...said.map(r => r.clips));
+    const rt = cs => cs.reduce((a, c) => a + Math.max(0, c.end - c.start), 0);
+    return { slug: topic.slug || "", name: topic.name || topic.slug || "", q: topic.q || topic.name || "",
+      phrases, town, moments: all.length, mentions: all.reduce((a, h) => a + (+h.mentions || 0), 0),
+      n_meetings: said.length, n_town_meetings: rows.length, meetings: rows, months,
+      undated: said.filter(r => !tpIsMonth(r.date)).length, bodies,
+      first: { pid: first.pid, date: first.date, body: first.body, t: first.hits[0].t, quote: tpContext(first.hits[0]) },
+      latest: { pid: latest.pid, date: latest.date, body: latest.body, t: latest.hits[latest.hits.length - 1].t, quote: tpContext(latest.hits[latest.hits.length - 1]) },
+      peak: { pid: peak.pid, date: peak.date, body: peak.body, n: peak.n, mentions: peak.mentions, t: peak.first_t,
+              span: Math.max(0, peak.last_t - peak.first_t) },
+      gap, elsewhere, cowords: tpCowords(all, phrases), chapters,
+      reel: { short: reelShareURL(short), short_n: short.length, short_runtime: rt(short),
+              full: reelShareURL(full), full_n: full.length, full_runtime: rt(full) } };
+  }
+
+  /* ---- the pictures, the press's twins (web/charts.py) ---- */
+  const TP_MON = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const tpMonthName = mo => tpIsMonth(mo) ? `${TP_MON[+mo.slice(5, 7)]} ${mo.slice(0, 4)}` : "undated";
+  const tpN = (n, one, many) => `${n} ${n === 1 ? one : (many || one + "s")}`;
+  const tpTwin = (rows, head) => `<details class="graphtwin"><summary>the same, as a table</summary>
+    <div class="fp-twinwrap"><table class="twin"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div></details>`;
+  function tpMonthBars(months, rows) {
+    if (!months.length) return '<p class="hint">no dated meeting says it yet</p>';
+    const mx = Math.max(1, ...months.map(x => +x.mentions || 0));
+    const firstOf = Object.create(null);
+    for (const r of rows) if (r.n && tpIsMonth(r.date)) firstOf[r.date.slice(0, 7)] ||= r;
+    let prev = null; const cols = [], trows = [];
+    for (const x of months) {
+      const n = +x.mentions || 0, h = n ? 6 + Math.round(58 * n / mx) : 2;
+      const tip = x.meetings ? `${tpMonthName(x.month)}: ${tpN(n, "mention")} in ${x.said} of ${tpN(x.meetings, "meeting")}`
+                             : `${tpMonthName(x.month)}: no meeting on the record`;
+      const dots = '<i class="tp-dot on"></i>'.repeat(x.said) + '<i class="tp-dot"></i>'.repeat(x.meetings - x.said);
+      const yr = x.month.slice(0, 4);
+      const label = `<label>${esc(TP_MON[+x.month.slice(5, 7)] || x.month)}${yr !== prev ? `<small>${esc(yr)}</small>` : ""}</label>`;
+      prev = yr;
+      const inner = `<b>${n || ""}</b><span class="tp-bar" style="height:${h}px"></span><span class="tp-dots">${dots}</span>${label}`;
+      const r0 = firstOf[x.month];
+      cols.push(n && r0
+        ? `<a class="tp-mcol" href="${BASE}/m/${encodeURIComponent(r0.pid)}#t${Math.floor(r0.first_t || 0)}" title="${esc(tip)}" aria-label="${esc(tip)}">${inner}</a>`
+        : `<span class="tp-mcol${x.meetings ? "" : " tp-nomeet"}" title="${esc(tip)}" aria-label="${esc(tip)}">${inner}</span>`);
+      trows.push(`<tr><td>${esc(tpMonthName(x.month))}</td><td>${x.meetings}</td><td>${x.said}</td><td>${n}</td></tr>`);
+    }
+    return `<div class="tp-months" role="group" aria-label="mentions month by month">${cols.join("")}</div>`
+      + tpTwin(trows.join(""), "<th>month</th><th>meetings</th><th>said it</th><th>mentions</th>");
+  }
+  function tpTapes(rows) {
+    const said = rows.filter(r => r.n); if (!said.length) return "";
+    const out = [], trows = [];
+    for (const r of said) {
+      const dur = Math.max(+r.duration || 0, 1), counts = r.bins, mx = Math.max(1, ...counts);
+      const bars = counts.map((c, i) => `<a class="fp-sbar" href="${BASE}/m/${encodeURIComponent(r.pid)}#t${Math.floor(dur * i / counts.length)}"
+        title="${hms(dur * i / counts.length)}–${hms(dur * (i + 1) / counts.length)}: ${tpN(c, "line")}"><i style="height:${c ? 2 + Math.round(20 * c / mx) : 1}px"></i></a>`).join("");
+      out.push(`<div class="fp-spark"><a class="fp-sterm" href="${BASE}/m/${encodeURIComponent(r.pid)}" title="${esc(r.title)}">${TP_DAY.test(r.date) ? esc(r.date.slice(5, 10)) : "undated"} · ${esc(r.body)}</a>
+        <span class="fp-sbars">${bars}</span><span class="fp-sn">${tpN(r.n, "line")}</span></div>`);
+      trows.push(`<tr><td><a href="${BASE}/m/${encodeURIComponent(r.pid)}#t${Math.floor(r.first_t || 0)}">${esc(r.date || "undated")}</a></td><td>${esc(r.body)}</td><td>${r.n}</td><td>${hms(r.first_t || 0)}</td><td>${hms(r.last_t || 0)}</td></tr>`);
+    }
+    return `<div class="fp-sparks tp-tapes">${out.join("")}</div>`
+      + tpTwin(trows.join(""), "<th>meeting</th><th>body</th><th>lines</th><th>first at</th><th>last at</th>");
+  }
+  function tpCowordBars(words, q, town) {
+    if (!words.length) return "";
+    const mx = Math.max(1, ...words.map(w => +w.count || 0));
+    return `<div class="lenses fp-topics tp-cowords">` + words.map(w => {
+      const both = `${q} ${w.word}`;
+      const href = `${BASE}/s?q=${encodeURIComponent(both)}` + (town ? `&town=${encodeURIComponent(town)}` : "");
+      return `<div class="lensrow"><a class="lenslabel fp-topic" href="${href}" title="search the record for “${esc(both)}”">${esc(w.word)}</a>
+        <span class="lensbar"><i style="width:${Math.round(100 * w.count / mx)}%"></i></span><span class="lensn">${w.count}</span><span class="lensdrift"></span></div>`;
+    }).join("") + `</div>`;
+  }
+  const tpDay = d => { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(String(d || ""));
+    if (!m) return "an undated meeting";
+    const dt = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));   // a real calendar day, or undated
+    if (dt.getUTCFullYear() !== +m[1] || dt.getUTCMonth() !== +m[2] - 1 || dt.getUTCDate() !== +m[3]) return "an undated meeting";
+    return `${["","January","February","March","April","May","June","July","August","September","October","November","December"][+m[2]]} ${+m[3]}, ${m[1]}`; };
+  const tpTown = t => t ? `${esc(t)}’s bodies` : "meetings with no town recorded";
+  const tpSpan = sec => sec < 90 ? "in under two minutes" : sec < 3600 ? `in ${Math.max(2, Math.round(sec / 60))} minutes`
+    : `over ${Math.floor(sec / 3600)} h` + (Math.floor((sec % 3600) / 60) ? ` ${Math.floor((sec % 3600) / 60)} min` : "");
+  const tpList = xs => { xs = xs.filter(Boolean); return xs.length < 2 ? (xs[0] || "") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]; };
+  /* the lede, counted — the press's story.topic() sentences */
+  function tpLede(d, searchHref) {
+    const at = (pid, t) => `${BASE}/m/${encodeURIComponent(pid)}#t${Math.floor(t || 0)}`;
+    const q = esc(d.q), f = d.first, l = d.latest, p = d.peak, out = [];
+    out.push(`The first time anyone said “${q}” on ${esc(d.town)}’s record was <a href="${at(f.pid, f.t)}">${esc(tpDay(f.date))}</a>, ${hms(f.t)} into a ${esc(f.body || "meeting")} meeting: “${esc(f.quote)}”.`);
+    if (d.gap === 1) out.push("The next meeting passed without it."); else if (d.gap > 1) out.push(`${d.gap} meetings then passed without it.`);
+    const share = Math.round(100 * p.mentions / Math.max(1, d.mentions));
+    out.push(p.pid !== f.pid
+      ? `It peaked on <a href="${at(p.pid, p.t)}">${esc(tpDay(p.date))}</a>, when the ${esc(p.body || "board")} said it ${tpN(p.mentions, "time")} ${tpSpan(p.span)} — ${share}% of every mention on the record.`
+      : `That night is still the peak: ${tpN(p.mentions, "mention")} ${tpSpan(p.span)}, ${share}% of every one on the record.`);
+    const bodies = tpList(d.bodies.filter(b => b.body && b.body !== "—").map(b => `the ${b.body}`));
+    const cw = d.cowords.slice(0, 4).map(w => w.word);
+    out.push(`In all, <a href="${searchHref}">${tpN(d.mentions, "mention")}</a> across ${d.n_meetings} of ${esc(d.town)}’s ${tpN(d.n_town_meetings, "meeting")}`
+      + (bodies ? `, by ${esc(bodies)}` : "") + (cw.length ? `; the words said beside it most: ${esc(cw.join(", "))}` : "") + ".");
+    if (l.pid !== f.pid || l.t !== f.t) out.push(`The latest was <a href="${at(l.pid, l.t)}">${esc(tpDay(l.date))}</a>: “${esc(l.quote)}”.`);
+    for (const e of d.elsewhere.slice(0, 2))
+      out.push(`${tpTown(e.town)} said it in ${tpN(e.moments, "line")} across ${tpN(e.meetings, "meeting")} — <a href="${BASE}/s?q=${encodeURIComponent(d.q)}">the whole record’s search</a> reads them together.`);
+    return out.join(" ");
+  }
+
+  /* ---- the search page: the index once, the progress line, the story ---- */
+  let SQ_INDEX = null;
+  function sqIndex() {
+    return SQ_INDEX ||= Promise.all([
+      getJSON(`${BASE}/search/meta.json`), getJSON(`${BASE}/search/segs.json`), getJSON(`${BASE}/search/shards.json`)])
+      .then(([meta, segs, shards]) => {
+        if (!Array.isArray(meta) || !Array.isArray(segs)) { SQ_INDEX = null; return null; }
+        return { meta, segs, shards: shards || {} };
+      });
+  }
+  /* the progress line: real stages at real await boundaries — never a timer
+     pretending to be work. Three stages, then it goes. */
+  const SQ_STAGES = 3;
+  function sqProgress(stage, text) {
+    const box = $("#sq-prog"); if (!box) return;
+    const bar = $(".sq-progbar i", box), txt = $(".sq-progtext", box);
+    if (stage == null) { box.hidden = true; return; }
+    box.hidden = false;
+    if (bar) bar.style.width = `${Math.round(100 * Math.min(stage, SQ_STAGES) / SQ_STAGES)}%`;
+    if (txt) txt.textContent = text || "";
+    if (stage >= SQ_STAGES) setTimeout(() => { if (box.dataset.stage === String(stage)) box.hidden = true; }, 900);
+    box.dataset.stage = String(stage);
+  }
+  const SQ_RANGES = [["1", "the last month", 1], ["6", "six months", 6], ["12", "a year", 12], ["all", "the whole record", 0]];
+  let SQ_RANGE = "all";
+  /* the stretch: the same day N months before the record's latest day
+     (the day clamped to 28, so every month has it) — "the last month" is a
+     month, not "since the first of last month" (a review catch) */
+  const sqSince = (latest, months) => {
+    const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(String(latest || "")); if (!m || !months) return "";
+    let y = +m[1], mo = +m[2] - months; const d = Math.min(28, +m[3]);
+    while (mo < 1) { mo += 12; y--; }
+    return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+  /* the hits the story counts: every line of the index that says the words,
+     in the reader's scope, with its neighbours for context */
+  function sqHits(idx, ids, phrases) {
+    const { meta, segs } = idx, pats = phrases.map(phraseRe);
+    const out = [];
+    for (const id of ids) {
+      const s = segs[id]; if (!s) continue;
+      const m = meta[s[0]] || {};
+      if (!inScope(m.town || "", m.body || "")) continue;
+      const nx = segs[id + 1], pv = segs[id - 1];
+      const after = nx && nx[0] === s[0] ? String(nx[3]) : "", before = pv && pv[0] === s[0] ? String(pv[3]) : "";
+      const n = mentionsIn(s[3], after, pats);
+      out.push({ pid: m.pid || "", t: +s[1] || 0, text: String(s[3] || ""), before, after, mentions: n || 1 });
+    }
+    return out;
+  }
+  async function sqStory(q, ids, idx) {
+    const box = $("#sq-story"); if (!box) return;
+    if (!ids.length) { box.innerHTML = ""; return; }
+    const phrases = [q.trim()];
+    // the meetings the story counts are the ones in the reader's scope —
+    // a body scope must not count the other bodies' nights as silence
+    const meetings = idx.meta.filter(m => m && m.pid && inScope(m.town || "", m.body || "")).map(m => ({ pid: m.pid, title: m.title || m.pid, date: m.date || "",
+      body: m.body || "", town: m.town || "", duration: +m.duration || 0 }));
+    const hitsAll = sqHits(idx, ids, phrases);
+    const latestDay = meetings.map(m => m.date).filter(d => TP_DAY.test(d)).sort().pop() || "";
+    // the story's town, fixed once: the reader's scope, else the town the
+    // whole record's count leads with — a narrower stretch keeps the town
+    const whole = tpAggregate(meetings, hitsAll, { slug: "", name: q, q, phrases }, SCOPE.town || "", false);
+    const townFixed = SCOPE.town || (whole && whole.town) || "";
+    const draw = () => {
+      const months = (SQ_RANGES.find(r => r[0] === SQ_RANGE) || SQ_RANGES[3])[2];
+      const since = sqSince(latestDay, months);
+      const ms = since ? meetings.filter(m => TP_DAY.test(m.date) && m.date >= since) : meetings;
+      const keep = new Set(ms.map(m => m.pid));
+      const hits = since ? hitsAll.filter(h => keep.has(h.pid)) : hitsAll;
+      const d = tpAggregate(ms, hits, { slug: "", name: q, q, phrases }, townFixed, false);
+      const range = `<div class="sq-range" role="radiogroup" aria-label="how far back to count">
+        <span class="kicker">count</span>${SQ_RANGES.map(r => `<button type="button" class="sq-rb" role="radio" data-range="${r[0]}"
+          aria-checked="${SQ_RANGE === r[0] ? "true" : "false"}" tabindex="${SQ_RANGE === r[0] ? 0 : -1}">${r[1]}</button>`).join("")}</div>`;
+      const rangeNote = (SQ_RANGE !== "all" && !since)
+        ? `<p class="hint">no dated meeting to count from — the whole record is counted</p>` : "";
+      if (!d || (townFixed && d.town !== townFixed)) {
+        // nothing in the story's town for this stretch — say so, and say who
+        // did say it: another town, or meetings with no town recorded
+        const scopeName = townFixed || [SCOPE.town, SCOPE.body].filter(Boolean).join(" · ") || "a town the record names";
+        const others = d ? [d, ...d.elsewhere].map(e => `${e.moments} in ${esc(e.town || "meetings with no town recorded")}`).join(", ") : "";
+        const why = (!whole && hitsAll.length && !since)
+          ? `the ${tpN(hitsAll.length, "line")} below are from meetings with no town recorded — the story needs a town to count by`
+          : `nothing says “${esc(q)}” in ${esc(scopeName)}${since ? ` since ${esc(tpDay(since))}` : ""}${others ? ` — elsewhere on the record: ${others}` : ""}`;
+        box.innerHTML = `<section class="sq-story tp-story"><span class="kicker">a word, over time — this search, told as a story</span>
+          <h2 class="fp-hl" id="sq-hl">How ${esc(townFixed || "the record")} talks about ${esc(q)}</h2>${range}${rangeNote}
+          <p class="hint">${why}.</p></section>`;
+        wireRange(); return;
+      }
+      const searchHref = location.pathname + location.search;
+      const cells = [[d.mentions, "mentions", searchHref], [`${d.n_meetings} of ${d.n_town_meetings}`, "meetings", `${BASE}/s`],
+        [d.bodies.length, "bodies", `${BASE}/analytics`],
+        [tpMonthName(d.first.date).replace(" ", " "), "first said", `${BASE}/m/${encodeURIComponent(d.first.pid)}#t${Math.floor(d.first.t)}`],
+        [tpMonthName(d.latest.date).replace(" ", " "), "latest", `${BASE}/m/${encodeURIComponent(d.latest.pid)}#t${Math.floor(d.latest.t)}`],
+        [hms(d.reel.full_runtime), "the supercut", d.reel.full]];
+      const busiest = d.months.reduce((p, x) => (!p || (+x.mentions > +p.mentions)) ? x : p, null);
+      const silent = d.months.filter(x => x.meetings && !x.said).length;
+      const p = d.peak;
+      box.innerHTML = `<section class="sq-story tp-story" aria-labelledby="sq-hl">
+        <span class="kicker">a word, over time — this search, told as a story</span>
+        <h2 class="fp-hl" id="sq-hl">How ${esc(d.town)} talks about ${esc(q)}</h2>
+        ${range}${rangeNote}
+        <p class="fp-lede">${tpLede(d, searchHref)}</p>
+        <p class="sq-jump"><a href="#results">the lines themselves ↓</a></p>
+        <p class="decksrc">counted in your browser from the record’s own index — every line of every transcript that says “${esc(q)}”, whole-word; no model, nothing sent anywhere; every number opens the tape</p>
+        <div class="sq-acts">
+          <a class="btn primary tp-play" href="${esc(d.reel.full)}">▶ play all ${tpN(d.reel.full_n, "clip")} as a reel · ${hms(d.reel.full_runtime)}</a>
+          <button type="button" class="btn" data-sq="tray">✂ put every clip on my tray</button>
+          <button type="button" class="btn" data-sq="share">⧉ copy the link to this search</button>
+        </div>
+        <section class="fp-part"><div class="sectionhead"><span class="kicker">“${esc(q)}”, by the numbers</span></div>
+          <div class="lead-nums">${cells.map(c => `<a class="ln" href="${esc(c[2])}"><b>${esc(c[0])}</b><span>${esc(c[1])}</span></a>`).join("")}</div></section>
+        <section class="fp-part"><div class="sectionhead"><span class="kicker">mentions, month by month</span></div>${tpMonthBars(d.months, d.meetings)}
+          ${busiest && busiest.mentions ? `<p class="fp-say">${esc(tpMonthName(busiest.month))} was the loudest month — ${tpN(busiest.mentions, "mention")} in ${busiest.said} of ${tpN(busiest.meetings, "meeting")}${silent ? `; in ${tpN(silent, "month")} the town met and never said it` : ""}. A dot is a meeting: filled where the word came up, hollow where it did not. Every bar opens the tape at the month’s first mention.</p>` : ""}</section>
+        <section class="fp-part"><div class="sectionhead"><span class="kicker">where it fell — every night that said it, slice by slice</span></div>${tpTapes(d.meetings)}
+          <p class="fp-say">Each row is a tape, start to end; a taller bar is a slice where “${esc(q)}” came up more. On ${esc(tpDay(p.date))} the ${esc(p.body || "board")} said it ${tpN(p.mentions, "time")} ${tpSpan(p.span)}. Every bar opens the tape there.</p></section>
+        ${d.cowords.length ? `<section class="fp-part"><div class="sectionhead"><span class="kicker">the words beside it — what was said in the same breath</span></div>${tpCowordBars(d.cowords, q, SCOPE.town || "")}
+          <p class="fp-say">Counted in each line that says “${esc(q)}” and the lines either side of it, civic stopwords out. Each word opens the record’s search for the two together.</p></section>` : ""}
+        <p class="sq-count">the ${tpN(ids.length, "line")} themselves, newest first${d.elsewhere.length ? ` — ${d.moments} in ${esc(d.town)}, ${d.elsewhere.map(e => `${e.moments} in ${esc(e.town || "meetings with no town recorded")}`).join(", ")}` : ""}${since ? ` (the list is the whole record; the count above is ${esc((SQ_RANGES.find(r => r[0] === SQ_RANGE) || SQ_RANGES[3])[1])})` : ""} — press <b>＋ reel</b> on any to cut it; <b>j</b> / <b>k</b> walk them, <b>c</b> cuts the one under the cursor</p>
+      </section>`;
+      wireRange();
+      const tray = $("[data-sq=tray]", box), share = $("[data-sq=share]", box);
+      if (tray) tray.onclick = () => sqTray(d, q, idx);
+      if (share) share.onclick = () => copyText(location.href, "link copied — this search, its scope and all");
+    };
+    const wireRange = () => {
+      const rbs = $$(".sq-rb", box);
+      rbs.forEach(b => {
+        b.onclick = () => { SQ_RANGE = b.dataset.range; draw(); const nb = $(`.sq-rb[data-range="${SQ_RANGE}"]`, box); if (nb) nb.focus(); };
+        b.onkeydown = e => {
+          if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+          e.preventDefault();
+          const i = rbs.indexOf(b), n = rbs[(i + (e.key === "ArrowRight" ? 1 : rbs.length - 1)) % rbs.length];
+          if (n) n.click();
+        };
+      });
+    };
+    draw();
+  }
+  /* every clip of the counted story onto the tray — appended after what is
+     there, by identity (takeMerge's rule), never doubled; the meeting's own
+     facts from the index (the tape, its length, the date) */
+  function sqTray(d, q, idx) {
+    const byPid = Object.create(null); for (const m of idx.meta) if (m && m.pid) byPid[m.pid] = m;
+    const clips = [];
+    for (const r of d.meetings) for (const c of r.clips) {
+      const m = byPid[c.pid] || {};
+      const h = r.hits.find(h => h.t === c.start) || r.hits[0] || {};
+      clips.push({ pid: c.pid, start: r1(c.start), end: r1(c.end), t: r1(c.start), kind: "hit",
+        quote: cut(h.text || "", 120), video_id: m.video_id || "", mtitle: m.title || "",
+        body: m.body || "", town: m.town || "", date: m.date || "", duration: +m.duration || 0 });
+    }
+    if (!clips.length) return;
+    const have = readReel(REEL_KEY);
+    const next = takeMerge("append", have, clips, true);
+    const added = next.length - have.length;
+    writeTray(next);
+    toast(added ? `${tpN(added, "clip")} on your tray — ${next.length} in all; open the studio to re-cut, or ▶ play` : "every one of these was on your tray already");
+  }
+
   async function search() {
     // resolve the scope here rather than trusting initScope to have landed
     // first — both await the same fetch, and a search that silently ignored
@@ -5441,7 +6194,11 @@
     if (inp) inp.addEventListener("input", () => {
       clearTimeout(deb);
       const val = inp.value.trim();
-      if (val.length < 3) { if (!val) { $("#results").innerHTML = ""; selReset(); } return; }
+      if (val.length < 3) {
+        if (!val) { $("#results").innerHTML = ""; selReset();
+          const story = $("#sq-story"), guide = $("#sq-guide");
+          if (story) story.innerHTML = ""; if (guide) guide.hidden = false; sqProgress(null); }
+        return; }
       deb = setTimeout(() => {
         const u = new URL(location.href);
         u.searchParams.set("q", val);
@@ -5452,11 +6209,19 @@
     // j / k (or the arrows) walk the hits; Enter opens the selected one
     document.addEventListener("keydown", e => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button") return;
+      // the keys sheet, open, keeps the page's keys out (a re-review catch:
+      // Enter on its close button opened a hit behind the modal)
+      if (e.target.closest && e.target.closest(".kb-sheet")) return;
       const res = $$(".sresult"); if (!res.length) return;
       if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); selMove(res, 1); }
       else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); selMove(res, -1); }
       else if (e.key === "Enter" && res[SEL]) location.href = res[SEL].href;
+      else if (e.key === "c" && res[SEL]) {
+        // the selected hit's own tick — the same press a pointer makes
+        const b = res[SEL].parentElement && $("[data-czcut]", res[SEL].parentElement);
+        if (b) { e.preventDefault(); toggleCut(b); }
+      }
     });
   }
   let SEL = -1;
@@ -5473,7 +6238,11 @@
   async function runSearch(q) {
     const box = $("#results"); box.innerHTML = '<p class="hint">searching…</p>';
     const terms = (q.toLowerCase().match(/[a-z0-9]+/g) || []);
-    if (!terms.length) { box.innerHTML = '<p class="hint">type a word or phrase</p>'; return; }
+    const guide = $("#sq-guide"), story = $("#sq-story");
+    if (!terms.length) { box.innerHTML = '<p class="hint">type a word or phrase</p>';
+      if (story) story.innerHTML = ""; if (guide) guide.hidden = false; sqProgress(null); return; }
+    if (guide) guide.hidden = true;
+    sqProgress(0, "opening the record’s index…");
     if (API && !API_DOWN) {
       const live = await liveSearch(q, terms, box);
       if (live) return;
@@ -5513,6 +6282,8 @@
     if (!r.hits.length) {
       box.innerHTML = `<p class="hint">nothing in the record for “${esc(q)}”`
         + (where ? ` in ${esc(where)}` : "") + `.</p>`;
+      const story = $("#sq-story"); if (story) story.innerHTML = "";
+      sqProgress(3, "nothing to count");
       return true;
     }
     box.innerHTML = `<p class="hint">${r.hits.length} moment${r.hits.length > 1 ? "s" : ""} `
@@ -5527,7 +6298,53 @@
           <span class="smeta">${esc(bits.filter(Boolean).join(" · "))}${h.speaker ? " · " + esc(h.speaker) : ""}</span></a>${searchTick(h.meeting_id, h.t, h.text, h.title, h.body, h.town, h.date)}</div>`;
       }).join("");
     paintCutTicks();
+    // the Studio answered the list; the story of the search is still the
+    // words themselves, counted from the record's own index (specs/25)
+    sqStoryFor(q, terms);
     return true;
+  }
+  /* the story for a query the live path answered: the index's own postings
+     for the same terms — what the static path would have listed */
+  async function sqStoryFor(q, terms) {
+    const idx = await sqIndex(); if (!idx) { sqProgress(null); return; }
+    sqProgress(1, `reading the lines that say “${q}”…`);
+    const ids = await sqIds(idx, terms, q);
+    sqProgress(2, `${tpN(ids.length, "line")} — counting, month by month…`);
+    await sqStory(q, ids, idx);
+    sqProgress(3, `${tpN(ids.length, "line")} counted`);
+  }
+  /* the index's postings for the terms, intersected, exact-phrase-first —
+     the one rule both the list and the story read by */
+  async function sqIds(idx, terms, q) {
+    const sets = await Promise.all(terms.map(async t => {
+      const c = /^[a-z0-9]$/.test(t[0]) ? t[0] : "_";
+      const sh = await getJSON(`${BASE}/search/t-${c}.json`);
+      return new Set(Array.isArray(sh && sh[t]) && Object.prototype.hasOwnProperty.call(sh, t) ? sh[t] : []);
+    }));
+    let ids = [...(sets[0] || [])];
+    for (let i = 1; i < sets.length; i++) ids = ids.filter(x => sets[i].has(x));
+    const phrase = q.trim().toLowerCase();
+    let hits = ids.filter(id => idx.segs[id]);
+    if (terms.length > 1) {
+      const exact = hits.filter(id => String(idx.segs[id][3]).toLowerCase().includes(phrase));
+      if (exact.length) hits = exact;
+    }
+    return hits;
+  }
+  /* the topic story's chapters (specs/25) — pressed as plain anchors with
+     the facts a tick needs; here each grows the search hit's own tick, so
+     the front page's moments cut like any search result. Hydration only:
+     the pressed bytes carry no button. */
+  function hydrateTopicTicks() {
+    for (const w of $$(".tq-wrap")) {
+      if ($("[data-czcut]", w)) continue;
+      const a = $("a.tq", w); if (!a) continue;
+      const d = a.dataset;
+      if (!d.pid || !isFinite(+d.t)) continue;
+      w.insertAdjacentHTML("beforeend",
+        searchTick(d.pid, +d.t, d.quote || "", d.mtitle || "", d.body || "", d.town || "", d.date || ""));
+    }
+    if ($(".tq-wrap [data-czcut]")) paintCutTicks();
   }
   /* a search hit's tick: everything the tray can label with, stamped at
      render — the end starts at the twelve-second window and trims to the
@@ -5554,28 +6371,16 @@
   }
 
   async function staticSearch(q, terms, box) {
-    const [meta, segs, shards] = await Promise.all([
-      getJSON(`${BASE}/search/meta.json`), getJSON(`${BASE}/search/segs.json`),
-      getJSON(`${BASE}/search/shards.json`)]);
-    if (!meta || !segs) { box.innerHTML = '<p class="hint">the index didn\'t load</p>'; return; }
-    // fetch each term's prefix shard, intersect postings
-    const sets = await Promise.all(terms.map(async t => {
-      const c = /^[a-z0-9]$/.test(t[0]) ? t[0] : "_";
-      const sh = await getJSON(`${BASE}/search/t-${c}.json`);
-      // own, listed postings only — a query holding "constructor" would
-      // otherwise read Object.prototype's and throw (a review catch)
-      return new Set(Array.isArray(sh && sh[t]) && Object.prototype.hasOwnProperty.call(sh, t) ? sh[t] : []);
-    }));
-    let ids = [...(sets[0] || [])];
-    for (let i = 1; i < sets.length; i++) ids = ids.filter(x => sets[i].has(x));
-    // prefer exact-phrase segments on a multi-word query; else keep the AND hits
-    // (hits stays a list of segIds so a peek can reach the ±1 neighbours)
-    const phrase = q.trim().toLowerCase();
-    let hits = ids.filter(id => segs[id]);
-    if (terms.length > 1) {
-      const exact = hits.filter(id => String(segs[id][3]).toLowerCase().includes(phrase));
-      if (exact.length) hits = exact;
-    }
+    const idx = await sqIndex();
+    if (!idx) { box.innerHTML = '<p class="hint">the index didn\'t load</p>'; sqProgress(null); return; }
+    const { meta, segs } = idx;
+    sqProgress(1, `${(+idx.shards.segments || segs.length).toLocaleString()} lines open — reading the ones that say “${q}”…`);
+    // each term's prefix shard, intersected; exact-phrase-first on a
+    // multi-word query (hits stays a list of segIds so a peek can reach
+    // the ±1 neighbours) — the one rule the story counts by too
+    let hits = await sqIds(idx, terms, q);
+    sqProgress(2, `${tpN(hits.length, "line")} — counting, month by month…`);
+    const storyIds = hits.slice();
     // scope BEFORE the cut, or the 80-hit ceiling would be spent on meetings
     // the reader has said they are not looking at — and a scoped search would
     // silently return fewer results than it found
@@ -5596,6 +6401,8 @@
              ${total} moment(s) elsewhere on the record.
              <button class="btn" type="button" id="widen">search every town</button></p>`
         : `<p class="hint">nothing in the record for “${esc(q)}”. It holds ${meta.length} meeting(s).</p>`;
+      const story = $("#sq-story"); if (story) story.innerHTML = "";
+      sqProgress(3, "nothing to count");
       const w = $("#widen");
       if (w) w.onclick = () => {
         const u = new URL(location.href);
@@ -5627,6 +6434,9 @@
       }).join("");
     paintCutTicks();
     selReset();
+    // the story of the search, over every line it found (not the eighty shown)
+    await sqStory(q, storyIds, idx);
+    sqProgress(3, `${tpN(storyIds.length, "line")} counted`);
   }
   /* The peek: ±1 segment of context from the segs plane, already in hand
      because the static path loaded it. Shown on hover (CSS); it costs no
