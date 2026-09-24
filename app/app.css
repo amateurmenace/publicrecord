@@ -871,6 +871,9 @@ a.pb-doc:hover b{color:var(--accent);text-decoration:underline}
 .pb-door-k{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
 .pb-foot .pb-door b{font:500 20px/1.2 var(--font-display);color:var(--paper)}
 .pb-door-go{display:inline-flex;align-items:center;min-height:44px;font-family:var(--font-mono);font-size:13px;color:var(--paper);text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
+.pb-take{margin:10px 0 0;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted);line-height:1.5}
+.pb-take a{color:var(--ink);text-decoration:underline;text-underline-offset:2px}
+.pb-take a:hover{color:var(--write)}
 .pb-door-go:hover{color:var(--paper);text-decoration-color:var(--rust)}
 .pb-door-go:focus-visible{outline:var(--border-w-strong) solid var(--paper);outline-offset:2px}
 .pk-hollow{border-color:var(--rust)}
@@ -1217,7 +1220,7 @@ table.heat td{width:40px;height:26px;text-align:center;
 .graphtwin{margin-top:var(--space-3)}
 .graphtwin summary{cursor:pointer;font:var(--weight-bold) var(--text-xs)/1 var(--font-mono);color:var(--text-secondary)}
 table.twin{border-collapse:collapse;width:100%;margin-top:var(--space-2);font-size:var(--text-sm)}
-table.twin th,table.twin td{text-align:left;padding:5px 8px;border-bottom:var(--border-w) solid var(--border-hairline)}
+table.twin th,table.twin td{text-align:left;padding:5px 8px;border-bottom:var(--border-w) solid var(--border-hairline);overflow-wrap:anywhere}
 table.twin a{color:var(--accent)}
 
 /* ============================ still watching ============================ */
@@ -2253,11 +2256,12 @@ a.tp-mcol:hover b{text-decoration:underline}
 .bs-now-why{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
 .bs-moneybox{display:flex;flex-direction:column;gap:4px}
 .bs-money-k{color:var(--ink-2)}
-.bs-moneyrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;width:100%;padding:7px 10px;
+.bs-moneyrow{display:flex;justify-content:space-between;align-items:baseline;gap:4px 10px;width:100%;padding:7px 10px;
+  flex-wrap:wrap;min-width:0;   /* a narrow column (the side panel open at 1024) drops the meta to its own line, never past the edge */
   border:1px solid var(--rule);border-radius:6px;background:var(--card);color:var(--ink)}
 .bs-moneyrow:hover,.bs-moneyrow.on{border-color:var(--write);color:var(--ink)}
 .bs-money-l{font-family:var(--font-display);font-size:18px}
-.bs-money-m{font-family:var(--font-mono);font-size:11px;color:var(--muted);white-space:nowrap}
+.bs-money-m{font-family:var(--font-mono);font-size:11px;color:var(--muted);white-space:normal;text-align:right;margin-left:auto}
 .bs-labels{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:auto}
 .bs-makeit{margin-left:auto;font-family:var(--font-mono);font-size:var(--text-xs);color:var(--write)}
 .bs-filmstrip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}

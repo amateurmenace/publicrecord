@@ -3794,6 +3794,10 @@
     const out = { v: q.get("v") || "",
                   id: /^[0-9a-f]{16}$/.test(id) ? id : "",
                   title: cut(q.get("t") || "", PAPER_TITLE_MAX),
+                  // by=press rides on the links the press itself mints (its own
+                  // front pages): the page then says whose it is; any other
+                  // value, or none, is a link somebody shared
+                  by: q.get("by") === "press" ? "press" : "",
                   blocks: [] };
     const at = [];   // each decoded block's index among the link's parts
     const parts = (q.get("b") || "").split(",");
@@ -4560,7 +4564,14 @@
         // a 70KB "full link" is not the guidance a too-large paper needs
         let said = "";
         try { said = ((await r.json()) || {}).error || ""; } catch { /* not JSON */ }
-        if (said) { toast(said); return; }
+        if (said) {
+          // a page a steward took down (410): the store's refusal is said,
+          // and the full link is copied in the short one's place — what the
+          // other refusals do too (a review catch: a toast alone left the
+          // reader with nothing to share)
+          if (r.status === 410) { copyText(paperShareURL(p), said + " — full link copied instead"); return; }
+          toast(said); return;
+        }
         throw new Error(String(r.status));
       }
       const d = await r.json();
@@ -4669,7 +4680,18 @@
         + `for one, or open <a href="${BASE}/">the record</a> itself.`);
       doc = normalizePaper(stored); from = "stored";
     } else if (st.blocks.length || st.title) {
-      doc = normalizePaper({ title: st.title, blocks: st.blocks }); from = "link";
+      // the press marks its own links by=press — but a marker anyone can
+      // type is not a byline: the page says "the record's own" only for a
+      // link this stub itself pressed (#pfeat's cards, this pressing's) that
+      // carries no writer's paragraph; any other link is one somebody shared
+      // (a review catch: the marker alone put the record's name on any URL).
+      // Compared as the browser spells a query — an anchor's .search is
+      // normalised exactly as location.search is, so a title's apostrophe
+      // (%27 in the address bar, raw in the pressed href) still matches
+      const minted = $$("#pfeat a.pf-card").map(a => a.search);
+      const isPress = st.by === "press" && minted.includes(location.search)
+        && !st.blocks.some(b => b.kind === "note");
+      doc = normalizePaper({ title: st.title, blocks: st.blocks }); from = isPress ? "press" : "link";
     } else if ((location.search || "").length > 1) {
       // a query arrived but nothing decoded — a mangled link or a broken id.
       // Showing the reader THEIR draft here would mislabel what they were
@@ -4877,13 +4899,15 @@
     // receipts); the labels count what is the record's and what is the writer's
     const made = bsMadeFrom(doc, mby, iby);
     const head = `<header class="phead bs-phead">
-        <p class="pb-kick">${esc(made.kind)}${made.towns.length === 1 ? ` · ${esc(made.towns[0])}` : ""}${made.pids.length ? ` · made from ${nOf(made.pids.length, "meeting", "meetings")}` : ""} · ${from === "draft" ? "your draft" : from === "stored" ? "shared as a short link" : "shared as a link"} · the writer is not named, by design</p>
+        <p class="pb-kick">${esc(made.kind)}${made.towns.length === 1 ? ` · ${esc(made.towns[0])}` : ""}${made.pids.length ? ` · made from ${nOf(made.pids.length, "meeting", "meetings")}` : ""} · ${from === "press" ? "the record’s own, pressed nightly · no byline — the counts are the tape’s" : `${from === "draft" ? "your draft" : from === "stored" ? "shared as a short link" : "shared as a link"} · the writer is not named, by design`}</p>
         <h2 class="ptitle">${esc(printTitle(doc.title))}</h2>
         <p class="pfrom">${from === "draft"
           ? "your draft — it lives in this browser. EDIT, in the top bar, opens it in the editor; share it from there as a link or a file"
           : from === "stored"
             ? "served from the share store — content-addressed and read-only; the editor holds the original"
-            : "carried whole in the link you followed — no server held it"}</p>
+            : from === "press"
+              ? "the record’s own — pressed from the tape every night and carried whole in its link; no server held it"
+              : "carried whole in the link you followed — no server held it"}</p>
         ${made.labels.length ? `<p class="pb-labels">${made.labels.map(l => `<span>${esc(l)}</span>`).join("")}</p>` : ""}
       </header>`;
     const blocks = paintLayouts(doc.blocks.map(b =>
@@ -4892,6 +4916,15 @@
     // the door back into writing — the same receipts, the reader's own words
     const foot = blocks ? `<footer class="pb-foot"><p>${esc(made.foot)} · <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="license">CC BY-SA 4.0</a></p>${from !== "draft"
       ? `<p class="pb-door"><span class="pb-door-k">Disagree? Add to it?</span><b>Make your own from the same receipts</b><a class="pb-door-go" href="${BASE}/p#edit&amp;copy=${encodeURIComponent(encodePaperQS(doc))}">Start from this front page →</a></p>` : ""}</footer>` : "";
+    // a stored page is listed among the front pages; the way to have it
+    // taken down is on the page itself — a note to the steward, at the
+    // address the record already publishes for corrections — and on EVERY
+    // stored page, a title-only one most of all (a review catch: it hung on
+    // the foot, and a title over nothing has no foot). The record keeps no
+    // address for the reader, so it promises no reply and no outcome: a
+    // steward reads the ask and decides (specs/29, decided 2026-09-24)
+    const take = from === "stored"
+      ? `<p class="pb-take">Want this page taken down? <a href="mailto:${STEWARD_EMAIL}?subject=${encodeURIComponent("take down front page " + st.id)}&amp;body=${encodeURIComponent(location.href)}">Ask the steward</a> — the record keeps no address for you, so no reply comes: a steward reads the ask, and a page taken down is gone at the next night’s press.</p>` : "";
     // a title-only paper is a sanctioned form — say what it is, not that its
     // (nonexistent) blocks were curated away
     setTimeout(pvShow, 0);     // the stage's mark on a reel row survives the repaint
@@ -4901,7 +4934,7 @@
             <a href="${BASE}/">record itself</a> is one link up.</p>`
         : `<p class="hint">This paper is a title so far — its editor hasn’t
             added stories or reels yet. The <a href="${BASE}/">record
-            itself</a> is one link up.</p>`));
+            itself</a> is one link up.</p>`)) + take;
   }
   /* what a page is made of, read off its blocks and the planes this render
      fetched: the kind of front page (by its lead), the towns of its meetings,
