@@ -684,6 +684,19 @@ html.cz-m-studio .cz-modebar-seg button[aria-checked="true"]{background:var(--st
   color:var(--text-primary);line-height:1.4}
 .rc-meta{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-top:3px}
 .rc-meta .ts{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--accent)}
+/* a reel row's picture (specs/29 board 6): the meeting's own still — 160 by
+   90 on a paper, 96 by 54 in the tray — sized by its ROW, never the screen: a
+   reel in board 6's half column, or a paper beside the studio's panel, keeps
+   its words (a review catch: the quote column fell to nothing at 1280 in the
+   editor). The picture shrinks with the row (at most 30% of it on a paper, a
+   quarter in the tray) and steps aside where the row is narrow; a browser
+   without container queries keeps the shrinking picture. */
+.reelcitelist,.rt-clips{container-type:inline-size}
+.rc-still{flex:0 1 160px;width:160px;max-width:30%;height:auto;aspect-ratio:16/9;object-fit:cover;border-radius:4px;display:block}
+.rt-still{flex:0 1 96px;width:96px;max-width:25%;height:auto;aspect-ratio:16/9;object-fit:cover;border-radius:4px;display:block}
+@container (max-width:360px){.rc-still{display:none}}
+@container (max-width:520px){.rt-still{display:none}}
+@media (max-width:600px){.rt-still{display:none}}
 .rc-where{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);
   margin-bottom:var(--space-3)}
 /* make this yours (specs/22 §5.4): the explicit choice, painted in place —
@@ -2585,6 +2598,7 @@ a.tp-mcol:hover b{text-decoration:underline}
 }
 @media print{
   .bs-spine,.bs-stamp,.bs-navrow,.bs-ta,.bs-topbar .bs-edline{display:none !important}
+  .rc-nostill{display:none}   /* a background does not print: a meeting without a still leaves no blank hole on paper */
   .bs-nameplate{padding-bottom:18px}   /* the spine hides in print; the nameplate keeps the gap it held before tonight's section */
   .fp-chartwrap,.bs-weekrow{overflow:visible !important}
   .bs-weekrow{flex-wrap:wrap}
