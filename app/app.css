@@ -48,7 +48,18 @@ b,strong{font-weight:var(--weight-bold)}
 .bs-stamp button{font:inherit;letter-spacing:inherit;color:inherit;background:none;border:0;padding:6px 2px;margin:-6px 0;cursor:pointer;opacity:.82}
 .bs-stamp button[aria-checked="true"]{opacity:1;font-weight:var(--weight-medium);text-decoration:underline;text-underline-offset:3px}
 .bs-stamp button:focus-visible{outline:2px solid var(--paper);outline-offset:1px}
-.bs-nameplate{display:flex;align-items:flex-end;justify-content:space-between;gap:40px;padding:30px 0 18px}
+/* the wordmark, the spine, the switch — in that order in the page (board
+   3: the spine second on a phone); wide, the switch sits at the wordmark's
+   right and the spine spans beneath them */
+/* the two columns share the row as main's flex row shared it — in the ratio
+   of their natural widths (the promise's 640px to a two-town switch's 396px;
+   a one-town switch is narrower), so a narrow desktop squeezes neither alone
+   (a skeptic's catch: an auto column took the switch's full width first) */
+.bs-nameplate{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(0,1fr);column-gap:40px;align-items:end;padding:30px 0 0}
+.bs-nameplate:has(.bs-muni.one){grid-template-columns:minmax(0,2.8fr) minmax(0,1fr)}
+.bs-nameplate>.bs-wordmark-box{grid-column:1;grid-row:1}
+.bs-nameplate>.bs-muni{grid-column:2;grid-row:1}
+.bs-nameplate>.bs-spine{grid-column:1 / -1;grid-row:2;margin-top:18px}
 .bs-wordmark{display:block;font-family:var(--font-display);font-size:72px;font-weight:400;line-height:.95;
   letter-spacing:-.02em;color:var(--ink)}
 .bs-wordmark:hover{color:var(--ink)}
@@ -72,7 +83,7 @@ b,strong{font-weight:var(--weight-bold)}
 .bs-spine{position:relative;display:flex;flex-direction:column;gap:10px;padding:0 0 18px}
 .bs-spineform{position:relative;display:flex;gap:10px;align-items:center}
 .bs-spine-glass{position:absolute;left:18px;top:50%;transform:translateY(-50%);color:var(--ink);pointer-events:none}
-.bs-spineform input{flex:1;min-height:56px;padding:0 18px 0 52px;border:2px solid var(--ink);border-radius:10px;
+.bs-spineform input{flex:1;min-width:0;min-height:56px;padding:0 18px 0 52px;border:2px solid var(--ink);border-radius:10px;
   background:var(--card);font:400 22px/1.2 var(--font-sans);color:var(--ink)}
 .bs-spineform input::placeholder{color:var(--muted)}
 .bs-spineform input:focus{border-color:var(--write)}
@@ -2295,6 +2306,11 @@ a.tp-mcol:hover b{text-decoration:underline}
 .bs-tape{cursor:pointer}
 .bs-tape.bs-dim{opacity:.25}
 .bs-tape.on .bs-tape-ring{stroke:var(--write)}
+.bs-yearphone{display:none;padding:4px 0 2px}
+.bs-onphone{display:none}
+.bs-yearphone-svg{display:block;width:100%;height:auto;max-width:420px;margin:0 auto}
+.bs-ydot.bs-dim{opacity:.25}
+.bs-ydot.on{stroke:var(--write);stroke-width:2}
 .bs-yearwords{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:24px;margin-top:14px}
 .bs-yearline{grid-column:span 7;display:flex;flex-direction:column;gap:8px}
 .bs-tapeline{margin:0;font-family:var(--font-display);font-style:italic;font-size:20px;line-height:1.35;color:var(--ink)}
@@ -2487,7 +2503,8 @@ a.tp-mcol:hover b{text-decoration:underline}
   .bs-stamp{padding:5px 10px;gap:6px}
   .bs-stamp .bs-stamp-say{display:none}
   .fp-twinwrap{overflow-x:auto;max-width:100%}
-  .bs-nameplate{flex-direction:column;align-items:flex-start;gap:12px;padding:18px 0 10px}
+  .bs-nameplate{display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:18px 0 10px}
+  .bs-nameplate>.bs-spine{margin-top:0;padding-bottom:0}
   .bs-wordmark{font-size:40px}
   .bs-promise{font-size:14px}
   .bs-muni{align-items:flex-start}
@@ -2519,7 +2536,6 @@ a.tp-mcol:hover b{text-decoration:underline}
   .bs-sechead{flex-direction:column;align-items:flex-start;gap:4px}
   .bs-right{white-space:normal}
   .bs-sechead h2{font-size:22px}
-  .bs-year .fp-chartwrap{overflow-x:auto}
   .bs-yearwords{display:flex;flex-direction:column;gap:10px}
   .bs-tapeline{font-size:16px}
   .bs-colgrid{grid-template-columns:1fr;gap:20px}
@@ -2543,8 +2559,33 @@ a.tp-mcol:hover b{text-decoration:underline}
   .bs-reelrow img,.bs-reelrow .bs-nostill{width:100%;height:auto;aspect-ratio:16/9}
 }
 
+/* board 3 on a phone's screen (specs/29) — a screen's alone: an A4 page is
+   718px wide and must print the wide forms (a review catch) */
+@media screen and (max-width:720px){
+  /* the river static: its labels, dates and dashed line would be specks
+     stretched to nothing, so the bands stand alone (still a link to the full
+     page, where each lens is named — the sentence beneath says so), and a
+     river isolated wide and turned to a phone shows every band again */
+  .bs-river-svg text,.bs-river-svg .bs-rjoinline{display:none}
+  .bs-river-svg.bs-iso .bs-band,.bs-river-svg.bs-iso .bs-band.on{opacity:.86}
+  /* the year is board 3's own picture — a dot per meeting, month by month —
+     with the words and the download that describe it */
+  .bs-year .fp-chartwrap{display:none}
+  .bs-yearphone{display:block}
+  .bs-onwide{display:none}
+  .bs-onphone{display:revert}
+  /* tonight's tape keeps its still and Play-from chip; the score's eight
+     lanes cannot be read at this width, and the now-at card carries the
+     night (board 3; a peer's note) */
+  .bs-tonight .bs-scorecard{display:none}     /* the front page's tonight only — a meeting page's score is its jump bar (a skeptic's catch) */
+  /* the three frames from inside the night, a row to swipe rather than a
+     column a thousand pixels tall */
+  .bs-filmstrip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;padding:4px 4px 8px;margin:-4px -4px 0}   /* room inside the row for a frame's focus ring and its lit halo */
+  .bs-filmstrip>.bs-frame{flex:0 0 78%;scroll-snap-align:start}
+}
 @media print{
   .bs-spine,.bs-stamp,.bs-navrow,.bs-ta,.bs-topbar .bs-edline{display:none !important}
+  .bs-nameplate{padding-bottom:18px}   /* the spine hides in print; the nameplate keeps the gap it held before tonight's section */
   .fp-chartwrap,.bs-weekrow{overflow:visible !important}
   .bs-weekrow{flex-wrap:wrap}
   .bs-year-svg,.bs-score-svg{min-width:0 !important}
