@@ -83,7 +83,7 @@
     initStudio();
     wireStoryTabs();   // the front page's stories, one at a time (specs/24, /25)
     hydrateTopicTicks();   // a topic story's chapters grow their cut ticks — on the front page and on the story's own page (specs/25)
-    bsSpine(); bsScore(); bsYear(); bsRiver();   // the broadsheet re-lit: the spine's type-ahead, the score, the year, the river (specs/29)
+    bsSpine(); bsScore(); bsYear(); bsRiver(); bsGallery();   // the broadsheet re-lit: the spine's type-ahead, the score, the year, the river, the front pages' filters (specs/29)
     if (/\/app\/m\//.test(path)) { meeting(); wireFind(); }
     else if (/\/app\/r$/.test(path)) reel();
     else if (/\/app\/p$/.test(path)) paper();
@@ -920,7 +920,7 @@
         <a class="btn primary" href="${BASE}/p">📰 open your paper</a>
         <button type="button" class="btn" data-cz="plink">⧉ copy link</button>
         <button type="button" class="btn" data-cz="pjson">⬇ paper.json</button>
-        ${API ? `<button type="button" class="btn" data-cz="pshort">⚡ short link</button>` : ""}
+        ${API ? `<button type="button" class="btn" data-cz="pshort" title="a short link lists your page among the record’s front pages">⚡ short link — on the front pages after tonight’s press</button>` : ""}
         <button type="button" class="btn" data-cz="pclear">clear</button>
       </div>` : "";
     // the last short link minted for THIS paper, shown as a real link — a
@@ -4917,7 +4917,7 @@
     // means one; a page that opens on the record's strip is "the record,
     // over time", whatever template it began as
     const first = doc.blocks[0] || {};
-    const kind = (first.kind === "lead" || (first.kind === "story" && first.story === "meeting" && first.layout === "lead")) && pids.length === 1 ? "One meeting"
+    const kind = (first.kind === "lead" || (first.kind === "story" && first.story === "meeting")) && pids.length === 1 ? "One meeting"
       : first.kind === "story" && first.story === "issue" ? (doc.blocks[1] && doc.blocks[1].kind === "chart" && doc.blocks[1].chart === "ledger" ? "A vote and its history" : "An issue over time")
       : first.kind === "names" && first.who ? (first.who.startsWith("l-") ? "A place on the record" : first.who.startsWith("o-") ? "An organization on the record" : "A person on the record")
       : first.kind === "strip" && first.town && doc.blocks[1] && doc.blocks[1].kind === "strip" && doc.blocks[1].town && doc.blocks[1].town !== first.town ? "Two towns, side by side"
@@ -6060,7 +6060,7 @@
         <span class="cz-edshare"${PAPER_SHORT || ED_SHARE_OPEN ? "" : " hidden"}>
           <button type="button" class="btn" data-czed="plink">⧉ copy the link again</button>
           <button type="button" class="btn" data-czed="pjson">⬇ paper.json</button>
-          ${API ? `<button type="button" class="btn" data-czed="pshort">⚡ short link</button>` : ""}
+          ${API ? `<button type="button" class="btn" data-czed="pshort" title="a short link lists your page among the record’s front pages">⚡ short link — on the front pages after tonight’s press</button>` : ""}
           <button type="button" class="btn" data-czed="pclear">clear</button>
           ${PAPER_SHORT ? `<span class="cz-pshort-out">short link: <a href="${esc(PAPER_SHORT)}">${esc(PAPER_SHORT.replace(location.origin, ""))}</a></span>` : ""}
         </span>
@@ -6253,7 +6253,7 @@
         <span class="cz-desklabel">the template asks</span>
         ${asks.map((q, i) => `<button type="button" class="cz-ask" data-czask="${i}"><span class="cz-ask-n">${i + 1}.</span><span>${esc(q)}</span></button>`).join("")}
       </section>
-      <p class="cz-deskcov">No account. Nothing uploaded but the title, your notes and the references. Readers who open your link get the record’s bytes and your words; nobody is counted.</p>
+      <p class="cz-deskcov">No account. Nothing uploaded but the title, your notes and the references. Readers who open your link get the record’s bytes and your words; nobody is counted. A short link lists your page among the record’s front pages after the next nightly press, unsigned; a steward can take it down.</p>
     </aside>`;
   }
   let DESK_NOTE = -1;   // the paragraph the caret was last in — the desk cites into it
@@ -8217,6 +8217,48 @@
     pills.forEach(p => p.addEventListener("click", e => { e.preventDefault(); chapter = +p.dataset.chapter; pick = null; paint(); }));
     // the first press on a still names the meeting; a second opens it (the link)
     tapes.forEach(a => a.addEventListener("click", e => { if (pick === a.dataset.pid) return; e.preventDefault(); pick = a.dataset.pid; paint(); }));
+  }
+  /* the front pages (board 9): a filter narrows the grid — by who made a
+     page, by town, by the week, by kind — and the count line says what
+     shows; with the script off every card stands and the filters are
+     anchors. The door card is not a card and never hides. */
+  function bsGallery() {
+    const grid = $("#bs-gallery-grid"), nav = $(".bs-filters"); if (!grid || !nav) return;
+    const cards = $$(".bs-fpcard", grid), count = $("#bs-gallery-count"), links = $$(".bs-filter", nav);
+    // the filters are pressed hidden: a control that did nothing with the
+    // script off would be the dishonesty the covenant is against
+    nav.hidden = false;
+    const apply = f => {
+      const [k, v] = f === "all" ? ["all", ""] : f.split(":");
+      let n = 0;
+      cards.forEach(c => {
+        const towns = String(c.dataset.towns || "").split(" ").filter(Boolean);
+        // a card that names no town is the whole record's (the roll calls, a
+        // bare year), so every town's filter keeps it
+        const on = k === "all" || (k === "by" && c.dataset.by === v) || (k === "town" && (!towns.length || towns.includes(v)))
+          || (k === "week" && c.dataset.week === "1") || (k === "kind" && c.dataset.kind === v);
+        c.hidden = !on; if (on) n++;
+      });
+      links.forEach(a => { if (a.dataset.filter === f) a.setAttribute("aria-current", "true"); else a.removeAttribute("aria-current"); });
+      const on = links.find(a => a.dataset.filter === f), word = on ? on.textContent.trim() : "";
+      if (count) count.textContent = f === "all" ? (count.dataset.all || "")
+        : n ? `${tpN(n, "front page")} — ${word}` : `no front pages here yet — ${word}`;
+    };
+    nav.addEventListener("click", e => {
+      const a = e.target.closest(".bs-filter"); if (!a || !nav.contains(a)) return;
+      e.preventDefault(); apply(a.dataset.filter);
+      history.replaceState(null, "", a.getAttribute("href"));
+    });
+    const fromHash = () => { const a = links.find(x => x.getAttribute("href") === location.hash); if (a) apply(a.dataset.filter); return !!a; };
+    window.addEventListener("hashchange", fromHash);
+    if (!fromHash()) {
+      // the reader's own town, chosen on a page before this one (stored) or
+      // named in the link, narrows the grid first — their own opinion, with
+      // Everything one press away; never the one town an edition happens to
+      // hold ("only"), which nobody chose
+      edition().then(ed => { const sc = resolve(ed);
+        if (!location.hash && sc.town && (sc.from === "stored" || sc.from === "link")) { const a = links.find(x => x.dataset.filter === "town:" + bsSlug(sc.town)); if (a) apply(a.dataset.filter); } });
+    }
   }
   /* a lens label isolates its band; the same label again shows all eight */
   function bsRiver() {
