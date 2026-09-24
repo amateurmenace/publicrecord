@@ -805,6 +805,85 @@ a.pb-doc:hover b{color:var(--accent);text-decoration:underline}
 .pb-dg-b{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary)}
 .pb-dg-q{font-size:var(--text-sm);color:var(--text-primary)}
 @media (max-width:720px){.pb-dg{grid-template-columns:1fr}.pb-dg-d{grid-row:auto}}
+/* the broadsheet's front page (specs/29 P1): the head says what the page
+   is made of, the six blocks read in the paper palette (ink, rust, the
+   municipality's colour), the foot says whose each part is */
+.bs-phead{border-bottom:2px solid var(--ink)}
+.pb-kick{display:block;font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0 0 8px}
+.bs-phead .ptitle{font:500 46px/1.05 var(--font-display);letter-spacing:-.015em}
+.pb-kick{font-size:12px}
+.pb-labels{display:flex;flex-wrap:wrap;gap:4px 8px;margin:10px 0 0;font-family:var(--font-mono);font-size:12px;color:var(--ink-2)}
+.pb-labels span+span::before{content:"· ";color:var(--muted)}
+/* a block's head on a front page is a Fraunces line over a rule, as board 6
+   sets "What it means — the writer", "The reel", "How the talk was framed" */
+.paperbody .sectionhead .kicker,.paperbody .pb-note>.kicker,.paperbody .pb-search>.kicker{font:500 22px/1.15 var(--font-display);text-transform:none;letter-spacing:0;color:var(--ink)}
+.paperbody .sectionhead{border-bottom:2px solid var(--ink);padding-bottom:6px;margin-bottom:10px}
+.paperbody .pb-note>.kicker{display:block;border-bottom:2px solid var(--ink);padding-bottom:6px;margin-bottom:10px}
+.pb-leadstory{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:24px;margin:var(--space-4) 0;padding-bottom:var(--space-4);border-bottom:4px solid var(--town,var(--ink))}
+.pb-lead-pic img,.pb-lead-pic .bs-nostill{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:6px;display:block;height:auto}
+.pb-lead-body{display:flex;flex-direction:column;gap:8px;min-width:0}
+.pb-lead-body .pb-kick{color:var(--town,var(--ink-2));margin:0}
+.pb-lead-t{font:500 30px/1.1 var(--font-display);margin:0}
+.pb-lead-t a{color:var(--ink);text-decoration:none}
+.pb-lead-t a:hover{color:var(--rust)}
+.pb-lead-lede{font-size:16px;line-height:1.5;color:var(--ink-2);margin:0}
+.pb-lead-moments{list-style:none;margin:4px 0 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pb-lead-moments a{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;color:var(--ink);text-decoration:none;font-size:14px;padding:6px 8px;background:var(--card);border:1px solid var(--rule);border-radius:6px}
+.pb-lead-moments a:hover{border-color:var(--rust)}
+.pb-lead-moments .ts{font-family:var(--font-mono);font-size:12px;color:var(--rust)}
+.pb-lead-q{flex:1;min-width:0}
+.pb-lead-body .pb-chartsrc{margin-top:auto}
+.pb-week{margin:var(--space-2) 0 0}
+.pb-threads{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:var(--space-2) 0 0}
+.pb-thread{display:flex;flex-direction:column;gap:4px;padding:12px;background:var(--card);border:1px solid var(--rule);border-radius:6px;color:var(--ink);text-decoration:none}
+.pb-thread:hover{border-color:var(--rust)}
+.pb-thread b{font:500 17px/1.2 var(--font-display)}
+.pb-thread-n{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.pb-thread svg{width:100%;height:auto;display:block}
+.pb-thread-go{font-family:var(--font-mono);font-size:12px;color:var(--rust)}
+.pb-lenskey{display:flex;flex-wrap:wrap;gap:6px 14px;font-family:var(--font-mono);font-size:11px;color:var(--ink-2);margin:0 0 8px}
+.pb-lenskey i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.pb-strip{display:flex;flex-direction:column;gap:6px}
+.pb-striprow{display:grid;grid-template-columns:64px minmax(0,180px) minmax(0,1fr) 48px;gap:10px;align-items:center;color:var(--ink);text-decoration:none;font-size:13px;padding:4px 6px;border-radius:4px;border-left:3px solid var(--town,var(--ink))}
+.pb-striprow:hover{background:var(--card)}
+.pb-strip-d{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.pb-strip-b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.pb-strip-bar{display:flex;height:14px;background:var(--card);border-radius:3px;overflow:hidden}
+.pb-strip-bar i{display:block;height:100%}
+.pb-strip-n{font-family:var(--font-mono);font-size:11px;color:var(--ink);text-align:right}
+.pb-names{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.pb-namescol{display:flex;flex-direction:column;gap:6px}
+.pb-name{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:2px 10px;align-items:center;padding:6px 8px;background:var(--card);border:1px solid var(--rule);border-radius:6px;color:var(--ink);text-decoration:none;font-size:14px}
+.pb-name:hover{border-color:var(--rust)}
+.pb-name b{font-weight:var(--weight-medium)}
+.pb-name-n{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+.pb-name svg{grid-column:2;grid-row:1/span 2;width:100%;height:auto}
+.pb-who-spark svg{max-width:100%;height:auto}
+.pb-search{margin:var(--space-5) 0;padding:14px 16px;background:var(--card);border:1px solid var(--rule);border-radius:6px;display:flex;flex-direction:column;gap:8px}
+.pb-search label{display:flex;flex-direction:column;gap:8px}
+.pb-searchrow{display:flex;gap:8px}
+.pb-searchrow input{flex:1;min-width:0;min-height:44px;padding:0 12px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);font:400 15px/1.2 var(--font-sans);color:var(--ink)}
+.pb-searchrow input:focus{border-color:var(--rust)}
+.pb-searchrow .btn{min-height:44px;background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.pb-foot{margin:var(--space-6) 0 0;padding-top:var(--space-3);border-top:1px solid var(--rule)}
+.pb-foot p{font-family:var(--font-mono);font-size:11px;color:var(--muted);margin:0 0 8px}
+.pb-foot .pb-door{display:flex;flex-direction:column;gap:6px;font:400 15px/1.3 var(--font-sans);color:var(--paper);padding:16px 18px;background:var(--ink);border-radius:8px}
+.pb-door-k{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+.pb-foot .pb-door b{font:500 20px/1.2 var(--font-display);color:var(--paper)}
+.pb-door-go{display:inline-flex;align-items:center;min-height:44px;font-family:var(--font-mono);font-size:13px;color:var(--paper);text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
+.pb-door-go:hover{color:var(--paper);text-decoration-color:var(--rust)}
+.pb-door-go:focus-visible{outline:var(--border-w-strong) solid var(--paper);outline-offset:2px}
+.pk-hollow{border-color:var(--rust)}
+@media (max-width:720px){
+  .pb-leadstory{grid-template-columns:1fr;gap:12px}
+  .pb-threads{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pb-names{grid-template-columns:1fr}
+  .pb-striprow{grid-template-columns:56px minmax(0,1fr) 40px;gap:4px 8px}
+  .pb-strip-b{grid-column:2/4;font-size:12px}
+  .pb-strip-bar{grid-column:2;grid-row:2}.pb-strip-n{grid-column:3;grid-row:2}.pb-strip-d{grid-row:1/span 2}
+  .bs-phead .ptitle{font-size:30px}
+  .paperbody .sectionhead .kicker,.paperbody .pb-note>.kicker,.paperbody .pb-search>.kicker{font-size:19px}
+}
 /* the tray's quote press, and the editor's document chooser (studio chrome) */
 .cz-rquotebtn{font:var(--weight-bold) 10px/1 var(--font-mono);background:none;
   border:var(--border-w) solid var(--border-hairline);border-radius:var(--radius-sm);
@@ -1247,6 +1326,11 @@ table.twin a{color:var(--accent)}
   .cz-editing .cz-edbar,.cz-editing .cz-edslot{display:none !important}
   html.cz-m-studio .cz-editing .cz-edrow{border:0;padding:0}
   html.cz-m-studio .cz-editing .cz-edtitle{display:none}
+  .cz-blocks,.cz-desk,.cz-edacts-row,.cz-tplmore,.cz-edtop>.cz-edtpl,.cz-edstored,.cz-edpill,.cz-ednote-foot,.cz-tplpick{display:none !important}
+  html.cz-m-studio .cz-editing .cz-edgrid{display:block}
+  html.cz-m-studio .cz-editing .cz-edpage{border:0;padding:0}
+  html.cz-m-studio .cz-editing .cz-edrow{background:none}
+  html.cz-m-studio .cz-editing .cz-ednotewrap{border-left:0;padding-left:0}
   html.cz-m-studio .cz-editing .cz-edtitle-print{display:block;margin:0}
   html.cz-m-studio .cz-editing .cz-edhead{border-bottom-color:#000}
   html.cz-m-studio .cz-editing .cz-ednote{display:none}
@@ -1279,23 +1363,28 @@ table.twin a{color:var(--accent)}
    Built entirely by app.js; with these rules removed the page is still the paper.
    They divide cleanly into layout (the shift that makes room for the sidebar) and
    the ratified palette lift (§6.1). The lift is scoped to html.cz-m-studio by
-   construction: the purple + bright-green accents are declared on that class and
+   construction: the rust accent (specs/29 — the purples of specs/21 are retired) is declared on that class and
    nowhere else, so preview, paper, and the shared masthead/folio/footer never
    see them, and a page with JS off never enters a mode at all.
 
-   Two purple literals, both studio-scoped and both pinned by a guard test
-   (tests/test_web_bake.py): #a855f7 (civicmedia's --pop-purple) for surfaces and
-   borders, and #7c3aed (violet-600) for text and text-bearing fills — the darker
-   shade clears WCAG AA 4.5:1 where the lighter one would not. No fuchsia, ever.
+   The studio's tokens point at the paper's own rust (#B23A1D — the one
+   colour of writing, specs/29); the retired purples, should they return,
+   are admitted by the guard test (tests/test_web_bake.py) only under
+   html.cz-m-studio and never in :root: rust for surfaces and
+   borders — and, since specs/29, rust (#B23A1D) for both: the one colour of
+   writing on the broadsheet. No fuchsia, ever.
    Flat vector throughout — the quiet properties take no drop shadow (branding.md),
    and neither does the studio. */
 
 /* --- the accents: declared ONLY in studio mode, so they cannot leak (§6.1) --- */
 html.cz-m-studio{
-  --studio-accent:#a855f7;                 /* --pop-purple — surfaces + borders (non-text) */
-  --studio-accent-text:#7c3aed;            /* violet-600 — text + text fills, AA 4.5:1+ */
-  --studio-accent-2:#22c55e;               /* --green-bright — a non-text "reel" accent */
-  --studio-surface:color-mix(in srgb, var(--studio-accent) 5%, var(--surface-card));
+  /* specs/29: the studio wears the broadsheet's own rust — the one colour of
+     writing — on paper and card; the purples of specs/21 retired with the
+     board (rust on paper clears AA 4.5:1 for text; the frames are borders) */
+  --studio-accent:var(--rust,#B23A1D);
+  --studio-accent-text:var(--rust,#B23A1D);
+  --studio-accent-2:var(--ink-2,#4B473E);
+  --studio-surface:var(--paper,#F3EEE3);
   --sw:min(320px, 32vw);                   /* the sidebar's width == the paper shift */
 }
 html.cz-m-studio.cz-rail{--sw:44px}
@@ -1341,9 +1430,9 @@ html.cz-m-studio.cz-rail .cz-brand,
 html.cz-m-studio.cz-rail .cz-full,
 html.cz-m-studio.cz-rail .cz-modes{display:none}
 
-/* keyboard-visible focus — the same emerald ring the paper's global rule uses.
+/* keyboard-visible focus — the same rust ring the paper's global rule uses.
    --focus-ring is a brand token that the pressed :root does not emit, so fall
-   back to --state (green-emerald), which it does; without the fallback these
+   back to --state (rust), which it does; without the fallback these
    more-specific selectors would resolve to outline:none and silently override
    the working global :focus-visible ring. */
 .cz-mode:focus-visible,.cz-enter:focus-visible,.cz-hide:focus-visible,
@@ -1504,7 +1593,7 @@ html.cz-m-studio.cz-rail .cz-rail-btn{margin:0}
   color:var(--text-secondary);margin:var(--space-2) 0 0;overflow-wrap:anywhere}
 .cz-pshort-out a{color:var(--studio-accent-text, var(--accent))}
 /* the studio's own primary button carries the lift — the paper's .btn is untouched.
-   the darker violet keeps white text at AA 4.5:1 (the lighter --pop-purple would not) */
+   rust keeps white text at AA 4.5:1 */
 html.cz-m-studio .cz-studio .btn.primary{background:var(--studio-accent-text);
   border-color:var(--studio-accent-text)}
 
@@ -1512,7 +1601,7 @@ html.cz-m-studio .cz-studio .btn.primary{background:var(--studio-accent-text);
    preview and studio, never baked, never in paper mode. The row wraps the
    card untouched and the button sits beside it in the PAPER palette — the
    invitation may be visible, but preview is the quiet default, so it wears
-   the record's deep green, never the studio's purple. --- */
+   the record's ink, never the studio's rust. --- */
 .cz-mkwrap{display:flex;align-items:stretch;gap:6px;min-width:0}
 .cz-mkwrap>.lrow,.cz-mkwrap>.rsrow{flex:1;min-width:0}
 .cz-mkwrap[hidden]{display:none}
@@ -1719,6 +1808,169 @@ html.cz-m-studio .cz-toast{left:calc(50% + var(--sw) / 2)}
 /* --- narrow screens degrade to paper: the studio never shifts the reading. In
    studio mode it becomes an overlay drawer over the paper (specs/21 §7); preview
    stays the same small pill, and a collapsed studio stays a slim rail. --- */
+/* --- the editor as the board (specs/29 board 8): three columns — the block
+   shelf, the page, the writing desk — on paper; rust dashed frames with a
+   pill riding the top edge and ↑ ↓ × beside it; the headline as a Fraunces
+   field; the templates board on the empty page. Every rule sits under
+   html.cz-m-studio: the editor exists only there. --- */
+html.cz-m-studio .cz-edhead{border-bottom:0;margin:var(--space-3) 0 0;padding:0}
+html.cz-m-studio .cz-edtop{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-auto-flow:row;gap:10px 16px;align-items:center;
+  padding:14px 0 12px;border-bottom:2px solid var(--ink)}
+/* the items place themselves by column, never by a pinned row: the open
+   board takes a whole row and the field, the stored line and the pill flow
+   under it (a review catch: pinned rows collapsed the field) */
+html.cz-m-studio .cz-edtop .cz-edtitle{grid-column:2;width:100%;box-sizing:border-box;min-height:48px;padding:0 14px;margin:0;
+  border:1px solid var(--rule);border-radius:6px;background:var(--card);font:400 24px/1.2 var(--font-display);letter-spacing:0;color:var(--ink)}
+html.cz-m-studio .cz-edtop .cz-edtitle:focus{border-color:var(--rust)}
+html.cz-m-studio .cz-edtop .cz-edtitle::placeholder{font-weight:400;color:var(--ink-2)}
+html.cz-m-studio .cz-tplmore,html.cz-m-studio .cz-edtop>.cz-edtpl{grid-column:1;min-width:0}
+html.cz-m-studio .cz-tplmore[open]{grid-column:1/-1}
+@media (min-width:1241px){html.cz-m-studio .cz-tplmore[open]~.cz-edtitle,html.cz-m-studio .cz-tplmore[open]~.cz-edpill-head{grid-column:1/3}}
+html.cz-m-studio .cz-tplmore summary{list-style:none;cursor:pointer}
+html.cz-m-studio .cz-tplmore summary::-webkit-details-marker{display:none}
+html.cz-m-studio .cz-edtpl{font-family:var(--font-mono);font-size:12px;color:var(--ink-2);white-space:nowrap}
+html.cz-m-studio .cz-edtpl b{color:var(--rust);font-weight:var(--weight-medium)}
+html.cz-m-studio .cz-edtpl-go{color:var(--muted)}
+html.cz-m-studio .cz-edtpl-go::after{content:" ▾"}
+html.cz-m-studio .cz-tplmore[open] .cz-edtpl-go{color:var(--rust)}
+html.cz-m-studio .cz-tplmore[open] .cz-edtpl-go::after{content:" ▴"}
+html.cz-m-studio .cz-tplboard-wrap{padding:14px 0 4px}
+html.cz-m-studio .cz-edpill-head{grid-column:2;justify-self:start}
+html.cz-m-studio .cz-edstored{grid-column:3;font-family:var(--font-mono);font-size:11px;line-height:1.4;color:var(--muted);max-width:30ch}
+html.cz-m-studio .cz-edpill{display:inline-block;max-width:100%;padding:3px 8px;background:var(--rust);color:#fff;border-radius:999px;
+  font:400 10px/1.5 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+html.cz-m-studio .cz-edacts-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 0 0}
+html.cz-m-studio .cz-edacts-row .btn{min-height:44px;padding:0 18px;border-radius:6px;font:500 15px/1 var(--font-sans);
+  border:1px solid var(--ink);background:transparent;color:var(--ink)}
+html.cz-m-studio .cz-edacts-row .btn.primary{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+html.cz-m-studio .cz-edacts-row .btn:hover{border-color:var(--rust);color:var(--rust)}
+html.cz-m-studio .cz-edacts-row .btn.primary:hover{background:var(--rust);border-color:var(--rust);color:#fff}
+html.cz-m-studio .cz-edshare{display:inline-flex;flex-wrap:wrap;gap:8px;align-items:center}
+html.cz-m-studio .cz-edshare[hidden]{display:none}
+html.cz-m-studio .cz-edshare .btn{min-height:36px;padding:0 12px;font-size:13px;border-color:var(--rule)}
+html.cz-m-studio .cz-edshare .cz-pshort-out{margin:0}
+html.cz-m-studio .cz-edacts-row .pfrom{flex-basis:100%;margin:6px 0 0}
+/* the grid */
+html.cz-m-studio .cz-edgrid{display:grid;grid-template-columns:240px minmax(0,1fr) 300px;gap:20px;align-items:start;margin-top:var(--space-4)}
+html.cz-m-studio .cz-edpage{min-width:0;border-left:1px solid var(--rule);border-right:1px solid var(--rule);padding:6px 14px 14px}
+/* the block shelf */
+html.cz-m-studio .cz-blocks{display:flex;flex-direction:column;gap:8px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;overscroll-behavior:contain}
+html.cz-m-studio .cz-blk{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 12px;background:var(--card);
+  border:1px solid var(--rule);border-radius:6px;cursor:grab;text-align:left;font:400 14px/1.3 var(--font-sans);color:var(--ink)}
+html.cz-m-studio .cz-blk:hover{border-color:var(--rust)}
+html.cz-m-studio .cz-blk:active{cursor:grabbing}
+html.cz-m-studio .cz-blk-grip{color:var(--muted);font-size:14px;flex:0 0 auto}
+html.cz-m-studio .cz-blk-t{display:flex;flex-direction:column;min-width:0}
+html.cz-m-studio .cz-blk-t b{font-weight:var(--weight-medium)}
+html.cz-m-studio .cz-blk-t span{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+/* the frames */
+html.cz-m-studio .cz-edrow{position:relative;border:1.5px dashed var(--rust);border-radius:6px;padding:20px 14px 12px;margin:22px 0 0;background:var(--paper)}
+html.cz-m-studio .cz-edrow:hover,html.cz-m-studio .cz-edrow:focus-within{border-color:var(--rust);border-style:solid}
+html.cz-m-studio .cz-edbar{position:absolute;top:-13px;left:12px;right:12px;display:flex;align-items:center;gap:6px;padding:0;margin:0;border:0;min-width:0}
+html.cz-m-studio .cz-edhandle{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;
+  background:var(--card);border:1px solid var(--rule);border-radius:4px;font:500 12px/1 var(--font-mono);color:var(--ink-2)}
+html.cz-m-studio .cz-edhandle:hover{color:var(--rust);border-color:var(--rust)}
+html.cz-m-studio .cz-edkind.cz-edpill{flex:0 1 auto;letter-spacing:.08em;text-transform:uppercase;color:#fff}
+html.cz-m-studio .cz-edlayout,html.cz-m-studio .cz-edtown{font:500 11px/1 var(--font-mono);color:var(--ink);background:var(--card);
+  border:1px solid var(--rule);border-radius:4px;padding:4px 6px;min-height:24px;max-width:150px}
+html.cz-m-studio .cz-edlayout:hover,html.cz-m-studio .cz-edtown:hover{border-color:var(--rust)}
+html.cz-m-studio .cz-edacts{gap:4px}
+html.cz-m-studio .cz-edact{width:24px;height:24px;min-width:24px;min-height:24px;padding:0;border:1px solid var(--rule);border-radius:4px;
+  background:var(--card);font:500 12px/1 var(--font-mono);color:var(--ink)}
+html.cz-m-studio .cz-edact:hover{color:var(--rust);border-color:var(--rust)}
+html.cz-m-studio .cz-edbody>.pb-chart,html.cz-m-studio .cz-edbody>.pb-note,html.cz-m-studio .cz-edbody>.pb-reel,
+html.cz-m-studio .cz-edbody>.pb-quote,html.cz-m-studio .cz-edbody>.pb-search,html.cz-m-studio .cz-edbody>.pb-leadstory{margin-top:0;margin-bottom:0}
+html.cz-m-studio .cz-ednotewrap{background:none;border-left:3px solid var(--rust);padding:0 0 0 12px;margin:0}
+html.cz-m-studio .cz-ednote{border:1px solid var(--rule);background:var(--card);font-size:16px;line-height:1.55;min-height:96px}
+html.cz-m-studio .cz-ednote:focus{border-color:var(--rust)}
+html.cz-m-studio .cz-ednote-foot{display:flex;justify-content:space-between;gap:8px;font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-top:6px}
+/* the insertion points */
+html.cz-m-studio .cz-edslot{margin:12px 0 0;min-height:36px;justify-content:center}
+html.cz-m-studio .cz-edslot::before,html.cz-m-studio .cz-edslot::after{border-top-color:var(--rule)}
+html.cz-m-studio .cz-edadd{min-height:44px;padding:0 18px;border:1.5px dashed var(--rust);border-radius:6px;background:transparent;
+  color:var(--rust);font:400 14px/1 var(--font-sans)}
+html.cz-m-studio .cz-edadd:hover{background:var(--write-light,#F6E2DB);color:var(--rust);border-color:var(--rust)}
+html.cz-m-studio .cz-edslot.cz-drop-here::before,html.cz-m-studio .cz-edslot.cz-drop-here::after{border-top:3px solid var(--rust)}
+html.cz-m-studio .cz-edpanel{background:var(--card);border-color:var(--rust)}
+/* the writing desk */
+html.cz-m-studio .cz-desk{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;overscroll-behavior:contain}
+html.cz-m-studio .cz-deskcard{display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--rule);border-radius:6px;padding:14px}
+html.cz-m-studio .cz-desklabel{font-family:var(--font-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+html.cz-m-studio .cz-deskhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+html.cz-m-studio .cz-modelpill{display:inline-block;padding:3px 10px;border-radius:999px;background:var(--paper);color:var(--ink-2);font-family:var(--font-mono);font-size:12px}
+html.cz-m-studio .cz-deskfacts{max-height:40vh;overflow:auto;overscroll-behavior:contain}
+html.cz-m-studio .cz-fact{text-align:left;padding:8px 10px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);
+  font:400 13px/1.4 var(--font-sans);color:var(--ink);cursor:pointer}
+html.cz-m-studio .cz-fact:hover{border-color:var(--rust)}
+html.cz-m-studio .cz-fact .rt-kind{color:var(--rust)}
+html.cz-m-studio .cz-deskacts{display:flex;gap:8px;flex-wrap:wrap}
+html.cz-m-studio .cz-deskacts .btn{min-height:40px;padding:0 12px;border-radius:6px;font:400 13px/1 var(--font-sans);
+  border:1px solid var(--rule);background:var(--paper);color:var(--ink)}
+html.cz-m-studio .cz-deskacts .btn.primary{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+html.cz-m-studio .cz-deskacts .btn[disabled]{opacity:.6;cursor:default}
+html.cz-m-studio .cz-deskreceipts{font-size:13px;line-height:1.5;color:var(--ink);border-left:3px solid var(--rust);padding-left:10px;margin-top:4px}
+html.cz-m-studio .cz-deskreceipts[hidden]{display:none}
+html.cz-m-studio .cz-deskreceipts p{margin:0 0 8px}
+html.cz-m-studio .cz-ask{display:flex;gap:10px;align-items:flex-start;text-align:left;background:none;border:0;padding:4px 0;
+  font:400 14px/1.4 var(--font-sans);color:var(--ink);cursor:pointer}
+html.cz-m-studio .cz-ask-n{font-family:var(--font-mono);font-size:12px;color:var(--rust);flex:0 0 auto}
+html.cz-m-studio .cz-ask:hover span:last-child{text-decoration:underline;text-decoration-color:var(--rust)}
+html.cz-m-studio .cz-deskcov{font-family:var(--font-mono);font-size:11px;color:var(--muted);line-height:1.5;margin:0}
+/* the templates board (board 7) */
+html.cz-m-studio .cz-tpl-h{font:500 44px/1.05 var(--font-display);letter-spacing:-.015em;margin:var(--space-4) 0 8px;color:var(--ink)}
+html.cz-m-studio .cz-tpl-lede{font-size:17px;line-height:1.5;color:var(--ink-2);max-width:72ch;margin:0 0 16px}
+html.cz-m-studio .cz-tplgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+html.cz-m-studio .cz-tplcard{display:flex;flex-direction:column;gap:10px;text-align:left;background:var(--card);border:1px solid var(--rule);
+  border-radius:8px;padding:16px;color:var(--ink);cursor:pointer;font:400 13px/1.4 var(--font-sans);min-height:220px}
+html.cz-m-studio .cz-tplcard:hover{border-color:var(--rust)}
+html.cz-m-studio .cz-tplcard b{font:500 22px/1.15 var(--font-display)}
+html.cz-m-studio .cz-tpl-draws{color:var(--ink-2)}
+html.cz-m-studio .cz-tpl-asks{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+html.cz-m-studio .cz-tpl-go{margin-top:auto;color:var(--rust);font:500 13px/1 var(--font-mono)}
+html.cz-m-studio .cz-tplpick{margin:16px 0 0}
+html.cz-m-studio .cz-tplpick[hidden]{display:none}
+html.cz-m-studio .cz-tplpick-in{background:var(--card);border:1px solid var(--rust);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+html.cz-m-studio .cz-tplq{min-height:44px;padding:0 12px;border:1px solid var(--rule);border-radius:6px;background:var(--paper);font:400 16px/1.2 var(--font-sans);color:var(--ink)}
+html.cz-m-studio .cz-tplq:focus{border-color:var(--rust)}
+html.cz-m-studio .cz-tplhits{display:grid;gap:6px}
+html.cz-m-studio .cz-tplhit{display:flex;gap:10px;align-items:center;flex-wrap:wrap;text-align:left;background:var(--paper);border:1px solid var(--rule);
+  border-radius:6px;padding:8px 10px;color:var(--ink);cursor:pointer;font:400 14px/1.3 var(--font-sans);min-height:44px}
+html.cz-m-studio .cz-tplhit:hover{border-color:var(--rust)}
+html.cz-m-studio .cz-tplhit span{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+html.cz-m-studio .cz-tplhit .cz-tplgo{margin-left:auto;color:var(--rust);font-family:var(--font-sans);font-size:13px}
+html.cz-m-studio .cz-tplboard .cz-edstarts{margin-top:var(--space-4)}
+/* keyboard-visible focus for the board's controls — with the fallback (the sheet's documented trap) */
+html.cz-m-studio .cz-blk:focus-visible,html.cz-m-studio .cz-fact:focus-visible,html.cz-m-studio .cz-ask:focus-visible,
+html.cz-m-studio .cz-tplcard:focus-visible,html.cz-m-studio .cz-tplhit:focus-visible,html.cz-m-studio .cz-tplq:focus-visible,
+html.cz-m-studio .cz-edtown:focus-visible,html.cz-m-studio .cz-edacts-row .btn:focus-visible,html.cz-m-studio .cz-deskacts .btn:focus-visible,
+html.cz-m-studio .cz-tplmore summary:focus-visible{
+  outline:var(--border-w-strong) solid var(--focus-ring, var(--state));outline-offset:2px}
+@media (max-width:1200px){
+  /* the sidebar open beside a page: the stamp keeps its two words, not its sentence */
+  html.cz-m-studio:not(.cz-rail) .bs-stamp .bs-stamp-say{display:none}
+}
+@media (pointer:coarse){
+  html.cz-m-studio .cz-edact,html.cz-m-studio .cz-edhandle{width:32px;height:32px;min-width:32px;min-height:32px}
+  html.cz-m-studio .cz-edbar{top:-17px}
+  html.cz-m-studio .cz-edrow{padding-top:24px}
+}
+@media (max-width:1240px){
+  html.cz-m-studio .cz-edgrid{grid-template-columns:1fr}
+  html.cz-m-studio .cz-blocks{position:static;flex-direction:row;flex-wrap:wrap;gap:6px}
+  html.cz-m-studio .cz-blocks .cz-tag{flex-basis:100%}
+  html.cz-m-studio .cz-blk{min-height:40px;padding:6px 10px;font-size:13px}
+  html.cz-m-studio .cz-blk-t span{display:none}
+  html.cz-m-studio .cz-edpage{border:0;padding:0}
+  html.cz-m-studio .cz-desk{position:static}
+  html.cz-m-studio .cz-tplgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  html.cz-m-studio .cz-edtop{grid-template-columns:1fr}
+  html.cz-m-studio .cz-edtop .cz-edtitle,html.cz-m-studio .cz-tplmore,html.cz-m-studio .cz-edpill-head,html.cz-m-studio .cz-edstored{grid-column:1;grid-row:auto}
+  html.cz-m-studio .cz-edstored{white-space:normal;order:1}
+  /* in one column the shelf and the desk scroll with the page — a
+     viewport-tall inner scroller that refuses to chain traps a finger */
+  html.cz-m-studio .cz-blocks,html.cz-m-studio .cz-desk{max-height:none;overflow:visible;overscroll-behavior:auto}
+  html.cz-m-studio .cz-deskfacts{max-height:none;overflow:visible}
+}
 @media (max-width:720px){
   html.cz-m-studio body{padding-left:0}
   html.cz-m-studio .mini-header{left:0}
@@ -1732,6 +1984,12 @@ html.cz-m-studio .cz-toast{left:calc(50% + var(--sw) / 2)}
      a 320px drawer cannot shift a 375px page. */
   html.cz-m-studio.cz-rail body{padding-left:44px}
   html.cz-m-studio.cz-rail .mini-header{left:44px}
+  html.cz-m-studio .cz-tplgrid{grid-template-columns:1fr}
+  html.cz-m-studio .cz-edtop .cz-edtitle{font-size:20px}
+  /* the frame's bar flows inside the frame, wrapping — every control stays
+     reachable (a layout is a stored choice with a painted consequence) */
+  html.cz-m-studio .cz-edbar{position:static;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+  html.cz-m-studio .cz-edrow{padding-top:10px}
 }
 
 /* ===== a word, over time (specs/25) — the topic story, pressed and live =====

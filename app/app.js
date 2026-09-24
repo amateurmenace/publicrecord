@@ -631,6 +631,7 @@
   function setMode(m) {
     const fromStamp = BS_STAMP_ORIGIN; BS_STAMP_ORIGIN = false;   // consumed first: a throw below cannot leave it stuck
     if (!MODES.includes(m)) m = "preview";
+    if (m !== "studio") ED_RAILED = false;   // the editor page rails the sidebar again on the next EDIT (specs/29 board 8)
     if (m !== "studio") pvPause();   // a hidden stage must not keep playing
     writeMode(m); markMode(m); updateModeButtons(); paintModeBar();
     // the make-affordances on the record's cards follow the mode (never in
@@ -829,6 +830,12 @@
     : b.kind === "note"
       ? `✎ a note${b.text.trim() ? " — " + b.text.trim().slice(0, 40) : ""}`
     : b.kind === "chart" ? chartRowLabel(b)
+    : b.kind === "lead" ? `★ lead story — ${b.title || b.pid}`
+    : b.kind === "week" ? `▦ this week${b.town ? " · " + b.town : ""}`
+    : b.kind === "threads" ? `⟁ threads${b.town ? " · " + b.town : ""}`
+    : b.kind === "strip" ? `▤ how they talked${b.town ? " · " + b.town : ""}`
+    : b.kind === "names" ? `◎ ${b.who ? (b.name || b.who) : "who and where" + (b.town ? " · " + b.town : "")}`
+    : b.kind === "search" ? "⌕ search box"
     : b.kind === "quote" ? `❝ ${(b.text || "").trim().slice(0, 40) || `a line at ${hms(b.t)}`}`
     : b.kind === "doc" ? `📄 ${b.dkind ? b.dkind + " — " : ""}${b.title || b.doc}`
     : b.kind === "digest" ? `⟳ what changed — ${b.name || b.slug} (${b.n})`
@@ -930,10 +937,11 @@
     const tplBtn = (t, label) =>
       `<button type="button" class="btn" data-cz="ptpl" data-tpl="${t}">${esc(label)}</button>`;
     const tpls = (n || p.title) ? "" :
-        `<div class="cz-tpls"><span class="cz-tplhead">or start from a shape</span>`
-      + tplBtn("rolls", "the roll calls, watched")
-      + (ref && ref.story === "issue" ? tplBtn("issue", "this issue, watched") : "")
+        `<div class="cz-tpls"><span class="cz-tplhead">or start from a template</span>`
+      + (ref && ref.story === "issue" ? tplBtn("issue", "this issue, over time") : "")
       + (ref && ref.story === "meeting" ? tplBtn("meeting", "this meeting, covered") : "")
+      + tplBtn("rolls", "the roll calls, watched")
+      + `<a class="btn" href="${BASE}/p#edit">all eight templates →</a>`
       + `</div>`;
     /* the shelf (C1): which paper is open, a new one, and delete — the
        select appears once there is a choice; "＋ new" always */
@@ -1422,15 +1430,21 @@
   const writeAsked = () => { try { localStorage.setItem(ASKED_KEY, "1"); } catch { /* private mode: asked again next page */ } };
   const writeTown = t => { writeAsked(); try { t ? localStorage.setItem(TOWN_KEY, t) : localStorage.removeItem(TOWN_KEY); } catch { /* private mode: the visit still scopes */ } };
   const REDRAW = [];                    /* page hooks re-run on a scope change */
-  let SCOPE = { town: "", body: "", from: "none", stored: "", lost: "" };
+  let SCOPE = { town: "", body: "", from: "none", stored: "", lost: "", pids: [] };
 
   /* Resolve the scope from the URL, storage, and what the edition holds.
      Pure over (edition, location, storage) so the banner logic can reason
-     about *where* the scope came from, not merely what it is. */
+     about *where* the scope came from, not merely what it is. specs/29: a
+     front page's search box adds m=<pid>,<pid> — the page's own meetings;
+     the search reads inside exactly those. Never stored, like ?town=. */
   function resolve(ed) {
+    const p = new URLSearchParams(location.search);
+    return { ...resolveTown(ed, p), pids: scopePids(p.get("m")) };
+  }
+  const scopePids = v => [...new Set(String(v || "").split(",").map(x => x.trim()).filter(x => /^[\w-]{1,128}$/.test(x)))].slice(0, 64);
+  function resolveTown(ed, p) {
     const names = (ed.towns || []).map(t => t.town);
     const match = n => names.find(x => x.toLowerCase() === String(n).toLowerCase()) || "";
-    const p = new URLSearchParams(location.search);
     const stored = readTown();
     const body = (p.get("body") || "").trim();
     // a stored town this pressing no longer carries is a fact worth saying out
@@ -1558,6 +1572,10 @@
   const inScope = (town, body) =>
     (!SCOPE.town || !town || town === SCOPE.town) &&
     (!SCOPE.body || (body || "") === SCOPE.body);
+  const inPids = pid => !(SCOPE.pids && SCOPE.pids.length) || SCOPE.pids.includes(String(pid || ""));
+  /* the scope, said: "the 3 meetings of a front page · Brookline · Select Board" */
+  const scopeWords = () => [(SCOPE.pids && SCOPE.pids.length) ? `the ${tpN(SCOPE.pids.length, "meeting")} a front page cites` : "",
+    SCOPE.town, SCOPE.body].filter(Boolean).join(" · ");
 
   /* ================= HOME (scope + body filter) ================= */
   async function home() {
@@ -3303,7 +3321,11 @@
      never a throw. */
 
   const PAPER_V = "1";
-  const PAPER_VS = ["1", "2", "3"];
+  // every link version THIS reader can render — one entry per grammar
+  // paperV can mint (a twin test holds the two lists equal: v=4 shipped in
+  // specs/24 without joining this list, and every v=4 link the press
+  // pressed read as "shared from a newer version" until specs/29 P1)
+  const PAPER_VS = ["1", "2", "3", "4", "5"];
   /* the layouts a block may ask for (specs/23 C1) — an enum, never data:
        lead — the block is the paper's lead: full width, the large treatment
        head — the block stands as a section head: its name, over a rule
@@ -3318,6 +3340,30 @@
        digest — "what changed": an issue and a window of its latest
                 appearances, computed at render from its timeline */
   const C2_KINDS = ["quote", "doc", "digest"];
+  /* the broadsheet's blocks (specs/29 P1) — enums and refs like every kind
+     before them, computed at render from the record's own planes:
+       lead    — one meeting told large: {kind, pid}
+       week    — the record's latest week of meetings as cards
+       threads — the widest threads as small multiples
+       strip   — how they talked: a lens bar per meeting, in date order
+       names   — who and where (or ONE name: who = its slug)
+       search  — a search box over the page's own meetings
+     week / threads / strip / names may name a municipality (town = the slug
+     the press mints from towns.json); names may name a who instead. In the
+     link: l.<pid> · w. k. h. p. (bare, t:<town>, and for names w:<who>) · s. */
+  const BS_KINDS = ["lead", "week", "threads", "strip", "names", "search"];
+  const BS_SCOPED = ["week", "threads", "strip", "names"];
+  const BS_PART = { week: "w", threads: "k", strip: "h", names: "p" };
+  const BS_KIND_OF = { w: "week", k: "threads", h: "strip", p: "names" };
+  /* a slug the way the press mints one (web/bake.py nslug): lower-case
+     ascii runs joined by "-" — a municipality's; a name's sits behind its
+     kind's letter (p- people · l- places · o- organizations), web/bake.py
+     who_slug. A node twin holds both equal. */
+  const bsSlug = s => (String(s == null ? "" : s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "none").slice(0, 96);
+  const bsWho = (kind, name) => `${kind === "places" ? "l" : kind === "organizations" ? "o" : "p"}-${bsSlug(name)}`;
+  // the exact shapes a town and a who may take — what the press mints, and
+  // nothing looser (record/papers.py holds the same two)
+  const BS_TOWN_REF = /^[a-z0-9-]{1,96}$/, BS_WHO_REF = /^[plo]-[a-z0-9-]{1,96}$/;
   const DOC_REF = /^[\w:.-]{1,160}$/;     // a document id, e.g. doc:budget
   const DIGEST_MAX = 12;
   /* which link version a paper needs: v=1 is the shipped P1 grammar
@@ -3331,7 +3377,9 @@
   // v=4: the two paths' kinds (specs/24) — a numbers / shape / ledger chart,
   // one meeting's votes, the record's reading; inlined so the twin that
   // lifts this line alone still runs
-  const paperV = p => p.blocks.some(b => b.kind === "reading" || (b.kind === "chart"
+  // v=5: the broadsheet's blocks (specs/29 P1) — inlined for the same reason
+  const paperV = p => p.blocks.some(b => ["lead", "week", "threads", "strip", "names", "search"].includes(b.kind)) ? "5"
+    : p.blocks.some(b => b.kind === "reading" || (b.kind === "chart"
       && (b.chart === "numbers" || b.chart === "shape" || b.chart === "ledger" || (b.chart === "votes" && !!b.pid)))) ? "4"
     : p.blocks.some(b => b.layout || C2_KINDS.includes(b.kind)) ? "3"
     : p.blocks.some(b => b.kind === "note" || b.kind === "chart") ? "2" : "1";
@@ -3452,7 +3500,7 @@
   function readPaper() {
     const sh = readPapers();
     const p = sh.papers.find(x => x.id === sh.active) || sh.papers[0];
-    return { title: p.title, blocks: p.blocks };
+    return { title: p.title, blocks: p.blocks, ...(p.tpl ? { tpl: p.tpl } : {}) };
   }
   /* returns whether the draft actually held — a browser that blocks storage
      gets told the truth by the callers, not a success toast over a void. Any
@@ -3513,6 +3561,9 @@
     const out = { title: "", blocks: [] };
     if (!p || typeof p !== "object") return out;
     if (typeof p.title === "string") out.title = cut(p.title, PAPER_TITLE_MAX);
+    // which template shaped the draft (specs/29 P1) — a local ride-along the
+    // writing desk reads for its three questions; no traveling form carries it
+    if (typeof p.tpl === "string" && /^[a-z]{3,12}$/.test(p.tpl)) out.tpl = p.tpl;
     for (const b of (Array.isArray(p.blocks) ? p.blocks : [])) {
       if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
       const nb = normalizeBlock(b);
@@ -3616,6 +3667,30 @@
       if (typeof b.name === "string") nb.name = b.name;
       return nb;
     }
+    // specs/29: the broadsheet's blocks — a lead names a meeting; the four
+    // scoped kinds may name a municipality (a slug), names may name a who
+    // instead (who wins when a hand-edited draft carries both); a search box
+    // names nothing. Labels ride the DRAFT only, as every kind's do.
+    if (b.kind === "lead" && PAPER_REF.test(b.pid || "")) {
+      const nb = { kind: "lead", pid: b.pid };
+      for (const k of ["title", "date", "town"]) if (typeof b[k] === "string") nb[k] = b[k];
+      return nb;
+    }
+    if (b.kind === "search") return { kind: "search" };
+    if (BS_SCOPED.includes(b.kind)) {
+      // a scope that is present but malformed drops the block, as the link
+      // does — a block that said "Boston" must never widen to every town
+      // under the same headline (a review catch; decodeReel's law is fewer
+      // blocks, not broader ones)
+      const has = k => b[k] != null && b[k] !== "";
+      if (has("who") && !(b.kind === "names" && typeof b.who === "string" && BS_WHO_REF.test(b.who))) return null;
+      if (has("town") && !(typeof b.town === "string" && BS_TOWN_REF.test(b.town))) return null;
+      const nb = { kind: b.kind };
+      if (has("who")) nb.who = b.who;
+      else if (has("town")) nb.town = b.town;
+      if (typeof b.name === "string") nb.name = b.name;
+      return nb;
+    }
     return null;
   }
 
@@ -3638,6 +3713,10 @@
         : b.kind === "quote" ? { kind: "quote", pid: b.pid, t: r1(b.t) }
         : b.kind === "doc" ? { kind: "doc", pid: b.pid, doc: b.doc }
         : b.kind === "digest" ? { kind: "digest", slug: b.slug, n: b.n }
+        : b.kind === "lead" ? { kind: "lead", pid: b.pid }
+        : b.kind === "search" ? { kind: "search" }
+        : BS_SCOPED.includes(b.kind)
+          ? (b.who ? { kind: b.kind, who: b.who } : b.town ? { kind: b.kind, town: b.town } : { kind: b.kind })
         : b.kind === "note"
           ? { kind: "note", text: b.text }
         : b.kind === "chart"
@@ -3673,6 +3752,14 @@
       : b.kind === "quote" ? `q.${encodeURIComponent(b.pid)}:${r1(b.t)}`
       : b.kind === "doc" ? `d.${encodeURIComponent(b.pid)}~${encodeURIComponent(b.doc)}`
       : b.kind === "digest" ? `g.${encodeURIComponent(b.slug)}:${b.n}`
+      // specs/29: l.<pid> the lead; w k h p the week, threads, strip and
+      // names — bare (dotless: a link that ends in "." loses its last block
+      // to every linkifier that trims the period — a review catch), or with
+      // t:<town> / (names) w:<who> after the dot; s the search box.
+      : b.kind === "lead" ? `l.${encodeURIComponent(b.pid)}`
+      : b.kind === "search" ? "s"
+      : BS_SCOPED.includes(b.kind)
+        ? BS_PART[b.kind] + (b.who ? "." + encodeURIComponent("w:" + b.who) : b.town ? "." + encodeURIComponent("t:" + b.town) : "")
       // specs/24: a numbers chart and a reading name a meeting OR an issue —
       // the ref says which (m:<pid> | i:<slug>; encodeURIComponent spells the
       // colon %3A, and no pid or slug holds one). a.<ref> is the reading.
@@ -3715,9 +3802,12 @@
       if (out.blocks.length >= PAPER_MAX_BLOCKS) break;
       const before = out.blocks.length;
       const dot = part.indexOf(".");
-      if (dot < 1) continue;
-      const kind = part.slice(0, dot), rest = part.slice(dot + 1);
-      decodePart(kind, rest, out);
+      // a dotless part is a bare broadsheet block (w k h p s) or nothing;
+      // the dotted spelling of the same (w. s.) reads as well — and either
+      // way the part is indexed below, so an l= pair keeps its block (a
+      // skeptic's catch: a `continue` here moved a layout onto the week)
+      if (dot < 1) { if (/^[wkhps]$/.test(part)) decodePart(part, "", out); }
+      else decodePart(part.slice(0, dot), part.slice(dot + 1), out);
       if (out.blocks.length > before) at.push(pi);
     }
     // layouts (C1): a pair that names no decoded block, or an unknown
@@ -3814,6 +3904,25 @@
             out.blocks.push({ kind: "chart", chart, pid: ref });
           // topics carries no ref — a reffed one is a mangle, dropped
         }
+      } else if (kind === "l") {
+        let ref = "";
+        try { ref = decodeURIComponent(rest).trim(); } catch { return; }
+        if (PAPER_REF.test(ref)) out.blocks.push({ kind: "lead", pid: ref });
+      } else if (kind === "s") {
+        // a search box carries nothing — anything after its dot is a mangle
+        if (rest === "") out.blocks.push({ kind: "search" });
+      } else if (Object.prototype.hasOwnProperty.call(BS_KIND_OF, kind)) {
+        // bare, or t:<town>; names alone may say w:<who>; anything else drops
+        // (own keys only — "constructor." is not a kind, a review's precedent)
+        let ref = "";
+        try { ref = decodeURIComponent(rest).trim(); } catch { return; }
+        const nb = { kind: BS_KIND_OF[kind] };
+        if (ref) {
+          const sc = /^([tw]):(.+)$/.exec(ref);
+          if (!sc || (sc[1] === "t" ? !BS_TOWN_REF.test(sc[2]) : (nb.kind !== "names" || !BS_WHO_REF.test(sc[2])))) return;
+          nb[sc[1] === "t" ? "town" : "who"] = sc[2];
+        }
+        out.blocks.push(nb);
       } else if (kind === "a") {
         // the record's reading of a meeting (m:<pid>) or an issue (i:<slug>)
         let ref = "";
@@ -4008,17 +4117,66 @@
     afterAdd(i, at);
     toast("reel added to your paper — the tray keeps rolling");
   }
+  /* the lead story (specs/29): one meeting told large — its label rides the
+     draft from the plane the page already holds or one honest fetch */
+  async function addLeadRef(pid, at) {
+    if (!PAPER_REF.test(pid || "")) return;
+    const dup = p => p.blocks.some(b => b.kind === "lead" && b.pid === pid);
+    if (dup(readPaper())) { toast("this meeting is already the lead story"); return; }
+    const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(pid)}.json`) || {};
+    const nb = normalizeBlock({ kind: "lead", pid, title: m.title || "", date: m.date || "", town: m.town || "" });
+    if (!nb) return;
+    const p = readPaper();
+    if (dup(p)) { toast("this meeting is already the lead story"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) { toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) { toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast("the lead story added — its still, its lede and its moments read from the record");
+  }
+  /* the week, the threads, the strip, the names, the search box (specs/29):
+     enums, with a municipality when one is asked for — nothing fetched, the
+     page computes each from the record's planes when it renders */
+  function addBsBlock(kind, at, town) {
+    if (!BS_SCOPED.includes(kind) && kind !== "search") return;
+    const nb = normalizeBlock({ kind, ...(town ? { town } : {}) });
+    if (!nb) return;
+    const p = readPaper();
+    if (kind !== "search" && p.blocks.some(b => b.kind === kind && !b.who && (b.town || "") === (nb.town || ""))) {
+      toast("that block is already on your page — its town can change from its frame"); return; }
+    const i = insertBlock(p, nb, at);
+    if (i < 0) { toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+    if (!savePaper(p)) { toast("this browser blocks storage — your paper can’t be kept here"); return; }
+    afterAdd(i, at);
+    toast(kind === "search" ? "a search box — readers search inside this page’s meetings" : "added — it draws from the record when your page renders");
+  }
+  /* a scoped block's municipality, from its frame's select (the store keeps
+     the slug; the plane names the town) */
+  function setBlockTown(i, town) {
+    const p = readPaper();
+    if (!(i >= 0 && i < p.blocks.length) || !BS_SCOPED.includes(p.blocks[i].kind)) return;
+    if (town && BS_TOWN_REF.test(town)) { p.blocks[i].town = town; delete p.blocks[i].who; } else delete p.blocks[i].town;
+    // the label follows the choice — a pill that kept saying "Boston" over a
+    // frame set to Brookline would describe storage, not the painted state
+    const shown = PAPER_TOWNS.find(t => bsSlug(t) === town);
+    if (shown) p.blocks[i].name = shown; else delete p.blocks[i].name;
+    if (!savePaper(p)) { toast("this browser blocks storage — the change didn’t hold"); return; }
+    retireShortOut();
+    PAGE_FOCUS = { act: "town", i };
+    refreshPaperSummary(); renderPaperNow();
+  }
   /* a note joins empty and is typed into in the panel — the draft may hold
      the blank; no traveling form does. Focus lands in the fresh textarea. */
   function addNoteToPaper(at) {
     const p = readPaper();
     const i = insertBlock(p, { kind: "note", text: "" }, at);
     if (i < 0) {
-      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return; }
+      toast("your paper is full — a paper holds " + PAPER_MAX_BLOCKS + " blocks"); return -1; }
     if (!savePaper(p)) {
-      toast("this browser blocks storage — your paper can’t be kept here"); return; }
+      toast("this browser blocks storage — your paper can’t be kept here"); return -1; }
     // focus lands in the fresh field — the panel's, or the page's own (A3)
     afterAdd(i, at, { act: "note", i });
+    return i;   // the index it landed at, or -1 — a caller's toast must not outrun a refusal
   }
   /* a chart joins as an enum + a ref; the label that rides along comes from
      the plane the open page already fetched (or one honest fetch), so the
@@ -4085,71 +4243,125 @@
     afterAdd(i, at);
     toast("the record’s reading added — it reads from the record when your paper renders");
   }
-  /* a template (P3): a pre-shaped paper the editor starts from — the same
-     blocks the panel's own buttons add, written in one press, client-side
-     only. The panel offers them only on an empty draft; the re-check here
+  /* the templates (specs/29 board 7) — each a list of blocks the record
+     fills and three questions the writer answers; the questions are the
+     paper, and a template never writes a word of it. `pick` is what the
+     template is about: a meeting, an issue, a name (people · places), two
+     towns, or nothing. `draws` says what the record can actually draw —
+     where the board promised more than the planes hold (who moved a vote,
+     when a person spoke), the card says what is there instead. */
+  const TEMPLATES = {
+    meeting: { name: "One meeting — what happened", pick: "meeting",
+      draws: "the still, the counted lede, the moments that decided it, the roll calls, the shape of the tape",
+      asks: ["What was the room really about?", "Which moment turned it?", "What did it leave undone?"] },
+    issue: { name: "An issue over time", pick: "issue",
+      draws: "a timeline of the meetings that took it up, a reel of its latest moments, how the night that said it most was framed",
+      asks: ["What changed between the first meeting and the last?", "Who pushed, and who pushed back?", "What is still on the table — what should a reader watch for next?"] },
+    vote: { name: "A vote and its history", pick: "issue",
+      draws: "the tally of every roll call on the question, the words around the first four, the record’s reading",
+      asks: ["What was voted, exactly?", "How did the count move?", "What was promised in between?"] },
+    person: { name: "A person on the record", pick: "people",
+      draws: "when they were named, how often, in which meetings — and the words around the latest three",
+      asks: ["What do they return to?", "Where did they change position?", "Who do they answer?"] },
+    place: { name: "A place on the record", pick: "places",
+      draws: "the meetings that named it, on a map of months, with the latest moments",
+      asks: ["What is being decided about it?", "Who lives with the decision?", "When does it come back?"] },
+    towns: { name: "Two towns, side by side", pick: "towns",
+      draws: "the same lens strip, the same threads, the same names — twice",
+      asks: ["Where do they talk alike?", "Where do they diverge?", "What does one do that the other doesn’t?"] },
+    year: { name: "The year so far", pick: "",
+      draws: "meetings by month with their lenses, the widest threads, the roll calls, the names",
+      asks: ["What did the year keep coming back to?", "What was decided?", "What was only discussed?"] },
+    rolls: { name: "The roll calls, watched", pick: "",
+      draws: "every roll call on the record, dot by dot — and how the talk around them was framed",
+      asks: ["Which roll call mattered most?", "Who was on the losing side, and why?", "What comes back for a vote next?"] },
+    blank: { name: "Blank broadsheet", pick: "", draws: "start empty; every block is on the shelf", asks: [] },
+  };
+  const TEMPLATE_ORDER = ["meeting", "issue", "vote", "person", "place", "towns", "year", "blank"];
+  const BS_MONTHS = ["", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  /* "June to September", "June" — an issue's span, the way the press says a
+     chapter's (web/story.py month_span_words, first and last only) */
+  const bsMonthSpan = (a, b) => { const ms = [a, b].filter(tpIsMonth).map(d => BS_MONTHS[+String(d).slice(5, 7)] || "").filter(Boolean);
+    return !ms.length ? "" : ms.length === 1 || ms[0] === ms[1] ? ms[0] : `${ms[0]} to ${ms[1]}`; };
+  /* the town an issue slug names (the record's own scheme: issue_<town>_<rest>) */
+  const bsSlugTown = slug => { const m = /^issue_([a-z]+)_/.exec(String(slug || "")); return m ? m[1].charAt(0).toUpperCase() + m[1].slice(1) : ""; };
+  /* a template (P3, redrawn for specs/29): a pre-shaped front page the
+     writer starts from — the same blocks the shelf adds, written in one
+     press, client-side only. Offered on an empty draft; the re-check here
      is for the draft that grew between paint and press (another tab, a
      storage race) — a template never replaces work without asking. The
-     note joins empty on purpose: a template may shape a paper, but the
-     editor's words are the editor's to write. */
+     note joins empty on purpose: a template may shape a page, but the
+     writer's words are the writer's to write. Returns whether the draft
+     was written — a caller rendering the page needs to know whether the
+     old draft still stands. */
   async function applyPaperTemplate(t, ref, where) {
     // the ref comes from the open page (the panel's offer), the front door's
-    // hash, or the empty editor's starts (A1/A4); `where` = "page" hands the
-    // fresh note to the on-page editor instead of the panel. Returns whether
-    // the draft was written — a caller rendering the page needs to know
-    // whether the old draft still stands.
+    // hash, the templates board's picker, or the empty editor's starts;
+    // `where` = "page" hands the fresh note to the on-page editor instead
+    // of the panel
     ref = ref || pageStoryRef();
     let title = "", blocks = [];
+    const bead = n => n && (n.beads || []).find(x => x && typeof x.t === "number");
     if (t === "rolls") {
       title = "the roll calls, watched";
       blocks = [{ kind: "chart", chart: "votes", layout: "lead" },
                 { kind: "chart", chart: "framing" },
                 { kind: "note", text: "" }];
-    } else if (t === "issue" && ref && ref.story === "issue") {
-      // path two (specs/24): how it moved — the issue, its numbers, its
-      // reach, what changed, every roll call along the way, then and now
-      // (its first word and its latest, read off their tapes), the record's
-      // reading meeting by meeting, and the note. A block whose plane holds
-      // nothing is not written: a story never opens with an empty chart.
+    } else if ((t === "issue" || t === "vote") && ref && ref.story === "issue") {
+      // board 6 — an issue over time: the issue as the lead (its name, the
+      // counted lede), the timeline of the meetings that took it up, the
+      // writer's paragraphs, a reel of its latest three moments in order,
+      // how the talk was framed on the night that said it most, and the
+      // search box over its meetings. A vote and its history keeps the
+      // lead and puts every roll call along the way first, the words
+      // around each (the line at each vote), then the record's reading.
+      // A block whose plane holds nothing is not written: a story never
+      // opens with an empty picture.
       const it = await getJSON(`${BASE}/issues/${encodeURIComponent(ref.slug)}.json`) || {};
       const name = it.name || ref.slug;
-      const tl = (it.timeline || []).filter(n => n && typeof n === "object" && n.pid);
-      const first = tl[0], last = tl[tl.length - 1];
-      const bead = n => n && (n.beads || []).find(x => x && typeof x.t === "number");
-      const quoteOf = n => ({ kind: "quote", pid: n.pid, t: bead(n).t, text: bead(n).text || "",
-                              title: n.title || "", layout: "half" });
-      title = `${name} — how it moved`;
-      blocks = [{ kind: "story", story: "issue", slug: ref.slug, layout: "lead",
-                  name: it.name || "", n_meetings: it.n_meetings,
-                  first_seen: it.first_seen || "", last_seen: it.last_seen || "" },
-                { kind: "chart", chart: "numbers", slug: ref.slug, name },
-                ...(tl.length ? [{ kind: "chart", chart: "reach", slug: ref.slug, name }] : []),
-                ...(tl.length > 1 ? [{ kind: "digest", slug: ref.slug, n: Math.min(6, tl.length), name }] : []),
-                ...((it.ledger || []).length ? [{ kind: "chart", chart: "ledger", slug: ref.slug, name }] : []),
-                ...(first && bead(first) ? [quoteOf(first)] : []),
-                ...(last && last !== first && bead(last) ? [quoteOf(last)] : []),
-                ...(tl.length ? [{ kind: "reading", slug: ref.slug, name }] : []),
-                { kind: "note", text: "" }];
+      const tl = (it.timeline || []).filter(n => n && typeof n === "object" && PAPER_REF.test(n.pid || ""));
+      const story = { kind: "story", story: "issue", slug: ref.slug, layout: "lead",
+                      name: it.name || "", n_meetings: it.n_meetings,
+                      first_seen: it.first_seen || "", last_seen: it.last_seen || "" };
+      if (t === "issue") {
+        const town = bsSlugTown(ref.slug), span = bsMonthSpan(it.first_seen, it.last_seen);
+        title = `${name} — what ${town || "the record"} said${span ? `, ${span}` : ""}`;
+        const loud = tl.slice().sort((a, c) => ((c.beads || []).length - (a.beads || []).length)
+          || (String(c.date || "") > String(a.date || "") ? 1 : String(c.date || "") < String(a.date || "") ? -1 : 0))[0];
+        const clips = tl.filter(n => bead(n)).slice(-3).map(n => ({ pid: n.pid, start: r1(Math.max(0, bead(n).t - 5)),
+          end: r1(bead(n).t + 40), kind: "moment", quote: bead(n).text || "" }));
+        blocks = [story,
+                  ...(tl.length ? [{ kind: "chart", chart: "reach", slug: ref.slug, name }] : []),
+                  { kind: "note", text: "" },
+                  ...(clips.length ? [{ kind: "reel", clips, layout: "half" }] : []),
+                  ...(loud ? [{ kind: "chart", chart: "framing", pid: loud.pid, title: loud.title || "", layout: "half" }] : []),
+                  { kind: "search" }];
+      } else {
+        const led = (it.ledger || []).filter(v => v && PAPER_REF.test(v.pid || "") && typeof v.t === "number");
+        // the plane answered and holds no roll call: a page titled "the vote"
+        // over an empty ledger is a promise the record cannot keep — say so
+        // and write nothing (a dark plane still writes the ref-only shape)
+        if (it.slug && !led.length) { toast(`no roll call on ${name} has been read from a tape — start from “An issue over time” instead`); return false; }
+        title = `${name} — the vote and its history`;
+        blocks = [story,
+                  { kind: "chart", chart: "ledger", slug: ref.slug, name },
+                  ...led.slice(0, 4).map(v => ({ kind: "quote", pid: v.pid, t: v.t, text: cut(String(v.motion || ""), 120), title: v.title || "" })),
+                  ...(tl.length ? [{ kind: "reading", slug: ref.slug, name }] : []),
+                  { kind: "search" },
+                  { kind: "note", text: "" }];
+      }
     } else if (t === "meeting" && ref && ref.story === "meeting") {
-      // path one (specs/24): what happened — the meeting, its numbers, the
-      // shape of the tape, the three moments that decided it (the loudest
-      // roll call, decision or pushback, never two from one second), its
-      // roll calls, how it was framed, the record's reading, its filings,
-      // and the note. Blocks whose plane holds nothing are not written.
+      // path one, on the board (specs/24 → specs/29): the lead story (the
+      // still, the counted lede, the three moments that decided it), the
+      // meeting in numbers, the shape of the tape, the three moments as
+      // quotes, its roll calls, how it was framed, the record's reading,
+      // its filings, the search box, and the note. Blocks whose plane
+      // holds nothing are not written.
       const m = await getJSON(`${BASE}/meetings/${encodeURIComponent(ref.pid)}.json`) || {};
       const mtitle = m.title || ref.pid;
-      const top = [], secs = new Set();
-      for (const mo of (m.moments || [])
-          .filter(mo => mo && typeof mo.t === "number" && ["vote", "decision", "tension"].includes(mo.kind))
-          .sort((a, c) => (+c.score || 0) - (+a.score || 0))) {
-        if (secs.has(Math.floor(mo.t))) continue;
-        secs.add(Math.floor(mo.t)); top.push(mo);
-        if (top.length === 3) break;
-      }
-      title = `${mtitle} — what happened`;
-      blocks = [{ kind: "story", story: "meeting", pid: ref.pid, layout: "lead",
-                  title: m.title || "", date: m.date || "", body: m.body || "",
-                  town: m.town || "", thumb: m.thumb || "" },
+      const top = bsTopMoments(m, 3);
+      title = m.body && TP_DAY.test(m.date || "") ? `${m.body}, in one night — ${tpDay(m.date)}` : `${mtitle} — what happened`;
+      blocks = [{ kind: "lead", pid: ref.pid, title: m.title || "", date: m.date || "", town: m.town || "" },
                 { kind: "chart", chart: "numbers", pid: ref.pid, title: mtitle },
                 ...((m.moments || []).length ? [{ kind: "chart", chart: "shape", pid: ref.pid, title: mtitle }] : []),
                 ...top.map(mo => ({ kind: "quote", pid: ref.pid, t: mo.t, text: mo.quote || "", title: mtitle })),
@@ -4158,7 +4370,46 @@
                 { kind: "reading", pid: ref.pid, title: mtitle },
                 ...((m.documents || []).slice(0, 3).filter(d => d && d.doc_id)
                     .map(d => ({ kind: "doc", pid: ref.pid, doc: d.doc_id, title: d.title || "", dkind: d.kind || "" }))),
+                { kind: "search" },
                 { kind: "note", text: "" }];
+    } else if ((t === "person" || t === "place") && ref && PAPER_REF.test(ref.who || "")) {
+      // a name on the record: the name told large (when it was named, how
+      // often, in which meetings), the words around its latest three
+      // mentions, the search box, and the note
+      const an = await getJSON(`${BASE}/analytics.json`) || {};
+      const one = (an.names || []).find(n => n && n.name && String(n.slug || bsWho(n.kind, n.name)) === ref.who);
+      const name = (one && one.name) || ref.name || ref.who;
+      title = `${name} — on the record`;
+      // a mention at 0:00 is a plane with no time for it (an older analysis),
+      // not a moment — real tapes open on a dead-air slate
+      const ms = one ? (one.meetings || []).filter(x => x && PAPER_REF.test(x.pid || "") && typeof x.t === "number" && x.t > 0)
+        .slice().sort((a, c) => (String(c.date || "") > String(a.date || "") ? 1 : String(c.date || "") < String(a.date || "") ? -1 : 0)) : [];
+      blocks = [{ kind: "names", who: ref.who, name, layout: "lead" },
+                ...ms.slice(0, 3).map(x => ({ kind: "quote", pid: x.pid, t: x.t, text: "", title: "" })),
+                { kind: "search" },
+                { kind: "note", text: "" }];
+    } else if (t === "towns") {
+      // two towns, side by side: the same strip, the same threads, the same
+      // names — twice, as halves. The towns come from the picker, or from
+      // the pressing's own when it holds two.
+      let a = ref && ref.a, b2 = ref && ref.b;
+      if (!(a && b2)) {
+        const ed = await edition();
+        const ts = (ed.towns || []).map(x => String((x && x.town) || "")).filter(Boolean);
+        if (ts.length < 2) { toast(`two towns side by side needs two towns — this pressing holds ${ts.length === 1 ? "one" : "none"}`); return false; }
+        a = ts[0]; b2 = ts[1];
+      }
+      title = `${a} and ${b2}, side by side`;
+      const pair = kind => [{ kind, town: bsSlug(a), name: a, layout: "half" }, { kind, town: bsSlug(b2), name: b2, layout: "half" }];
+      blocks = [...pair("strip"), ...pair("threads"), ...pair("names"), { kind: "note", text: "" }];
+    } else if (t === "year") {
+      // the year so far: meetings by month with their lenses (the strip),
+      // the widest threads, the roll calls, the names, the search box
+      const meta = await getJSON(`${BASE}/search/meta.json`);
+      const months = tpMonthRange((Array.isArray(meta) ? meta : []).filter(m => m && tpIsMonth(m.date)).map(m => String(m.date).slice(0, 7)));
+      title = months.length ? `The year so far — ${bsMonthSpan(months[0], months[months.length - 1])}` : "The year so far";
+      blocks = [{ kind: "strip", layout: "lead" }, { kind: "threads" }, { kind: "chart", chart: "votes" },
+                { kind: "names" }, { kind: "search" }, { kind: "note", text: "" }];
     } else return false;
     // the fetch awaited — re-read, and never overwrite silently. A draft
     // that is only a title (named first, shaped second — the on-page
@@ -4169,13 +4420,13 @@
         && !window.confirm("Start from this template? Your current draft "
                            + "will be replaced.")) return false;
     if (!cur.blocks.length && cur.title) title = cur.title;
-    const p = normalizePaper({ title, blocks });
+    const p = normalizePaper({ title, blocks, tpl: t });
     if (!savePaper(p)) {
       toast("this browser blocks storage — your paper can’t be kept here"); return false; }
     // focus lands in the fresh note: the one block a template cannot write
-    afterAdd(p.blocks.length - 1, where === "page" ? p.blocks.length - 1 : null,
-             { act: "note", i: p.blocks.length - 1 });
-    toast("a paper, pre-shaped — the note is yours to write");
+    const ni = Math.max(0, p.blocks.findIndex(b => b.kind === "note"));
+    afterAdd(ni, where === "page" ? ni : null, { act: "note", i: ni });
+    toast("a front page, pre-shaped — the paragraphs are yours to write");
     return true;
   }
   function clearPaper() {
@@ -4238,6 +4489,17 @@
           ? { kind: "reading", ...(b.pid ? { pid: b.pid } : { slug: b.slug }),
               computed: "in the reader's browser, from the analyzer's pressed read — no model",
               url: `${location.origin}${BASE}/${b.pid ? "m/" + b.pid : "i/" + b.slug}` }
+        : b.kind === "lead"
+          ? { kind: "lead", pid: b.pid, title: b.title || "",
+              computed: "the meeting's still, its counted lede and its moments, from its own pressed plane at render",
+              url: `${location.origin}${BASE}/m/${b.pid}` }
+        : b.kind === "search"
+          ? { kind: "search", computed: "a search box over this page's own meetings — it stores no query",
+              url: `${location.origin}${BASE}/s` }
+        : BS_SCOPED.includes(b.kind)
+          ? { kind: b.kind, ...(b.who ? { who: b.who } : {}), ...(b.town ? { town: b.town } : {}),
+              computed: "in the reader's browser, from the record's own planes",
+              url: `${location.origin}${BASE}/` }
         : b.story === "issue"
           ? { kind: "story", story: "issue", slug: b.slug, name: b.name || "",
               url: `${location.origin}${BASE}/i/${b.slug}` }
@@ -4274,6 +4536,8 @@
     PAPER_SHORT = "";
     const so = STUDIO && $(".cz-pshort-out", STUDIO);
     if (so) so.remove();
+    const pb = $("#paperbody"), po = pb && $(".cz-pshort-out", pb);
+    if (po) po.remove();
   }
   async function paperShortLink() {
     const p = readPaper();
@@ -4385,7 +4649,8 @@
     // a repaint invalidates any drag in flight (its source row is about to
     // be detached, and dragend fires on the detached node where no listener
     // hears it) and every render starts as the reader, not the editor
-    ED_DRAG = -1;
+    ED_DRAG = -1; ED_SHELF = "";
+    DESK_NOTE = -1;   // the paragraph the caret was in is an index of the shape about to repaint (R7)
     el.classList.remove("cz-editing");
     const gen = ++PAPER_GEN;
     const st = decodePaper(location.search);
@@ -4439,7 +4704,8 @@
         ED_HASH_SEEN = true;
         const hp = new URLSearchParams((location.hash || "").replace(/^#/, ""));
         const tpl = hp.get("tpl") || "";
-        if (hp.has("edit") || tpl) {
+        const copy = hp.get("copy") || "";
+        if (hp.has("edit") || tpl || copy) {
           // the door is a one-time instruction: consumed, then dropped from
           // the address, so a reload (or back) keeps whatever mode the
           // reader chose afterwards instead of re-opening the studio
@@ -4460,6 +4726,23 @@
             clearTimeout(PAPER_RERENDER);
           }
           PAGE_FOCUS = PAGE_FOCUS || { act: "title" };
+        }
+        if (copy) {
+          // "make your own from the same receipts" (board 6): the shared
+          // page's own link, decoded into the draft — asked about first when
+          // a draft with blocks stands, the template's rule
+          const got = decodePaper("?" + copy);
+          // the receipts travel; the other writer's paragraphs do not — a
+          // reshare must never carry someone else's words as yours (a review
+          // catch). One empty paragraph joins at the end to write into.
+          const refs = got.blocks.filter(b => b.kind !== "note");
+          const cur = readPaper();
+          if ((refs.length || got.title)
+              && (!cur.blocks.length || window.confirm("Start from this front page? Your current draft will be replaced."))) {
+            if (savePaper(normalizePaper({ title: (!cur.blocks.length && cur.title) ? cur.title : got.title, blocks: [...refs, { kind: "note", text: "" }] }))) toast("a copy of that front page’s receipts — the paragraphs are yours to write");
+            else toast("this browser blocks storage — your copy can’t be kept here");
+          }
+          doc = readPaper();
         }
         if (tpl) {
           const tref = (hp.get("ref") || "").trim();
@@ -4502,6 +4785,7 @@
     const mpids = new Set(), islugs = new Set();
     for (const b of doc.blocks) {
       if (b.kind === "story" && b.story === "meeting") mpids.add(b.pid);
+      else if (b.kind === "lead") mpids.add(b.pid);                      // specs/29: the lead story's meeting
       else if (b.kind === "story" && b.story === "issue") islugs.add(b.slug);
       else if (b.kind === "chart" && b.pid) mpids.add(b.pid);      // framing · numbers · shape · votes, of one meeting
       else if (b.kind === "chart" && b.slug) islugs.add(b.slug);   // reach · numbers · ledger, of one issue
@@ -4512,20 +4796,29 @@
     for (const b of doc.blocks)
       if (b.kind === "reel") b.clips.forEach(c => mpids.add(c.pid));
     const wantVotes = doc.blocks.some(b => b.kind === "chart" && b.chart === "votes" && !b.pid);
-    const wantAnalytics = doc.blocks.some(b => b.kind === "chart"
-      && (b.chart === "topics" || (b.chart === "framing" && !b.pid)));
+    const wantAnalytics = doc.blocks.some(b => (b.kind === "chart"
+      && (b.chart === "topics" || (b.chart === "framing" && !b.pid)))
+      || b.kind === "threads" || b.kind === "strip" || b.kind === "names");
+    // specs/29: the week, the threads, the strip and the names read the
+    // record's own index (search/meta.json: every meeting's town, day and
+    // still) and, when they name a municipality, the towns plane; the reach
+    // chart reads the index too, for the colour of each dot
+    const wantMeta = doc.blocks.some(b => BS_SCOPED.includes(b.kind) || (b.kind === "chart" && b.chart === "reach"));
+    const wantTowns = doc.blocks.some(b => BS_SCOPED.includes(b.kind) && b.town);
     // the tape's own words, once per meeting: a reel's cuts that are not
     // moments, and every pull-quote, read their line off transcript.txt,
     // fetched beside the planes
     const linePids = [...new Set(doc.blocks.flatMap(b =>
       b.kind === "reel" ? b.clips.map(c => c.pid) : b.kind === "quote" ? [b.pid] : []))]
       .slice(0, PAPER_MAX_CLIPS);
-    const [m, it, votesPlane, analytics, lineSets] = await Promise.all([
+    const [m, it, votesPlane, analytics, lineSets, metaPlane, townsPlane] = await Promise.all([
       fetchPlanes(mpids, "meetings", PAPER_MAX_BLOCKS + PAPER_MAX_CLIPS),
       fetchPlanes(islugs, "issues", PAPER_MAX_BLOCKS),
       wantVotes ? getJSON(`${BASE}/votes.json`) : Promise.resolve(null),
       wantAnalytics ? getJSON(`${BASE}/analytics.json`) : Promise.resolve(null),
       Promise.all(linePids.map(pid => segLines(pid).then(l => [pid, l]))),
+      wantMeta ? getJSON(`${BASE}/search/meta.json`) : Promise.resolve(null),
+      wantTowns ? getJSON(`${BASE}/towns.json`) : Promise.resolve(null),   // null when dark (edition() would hand back an empty list)
     ]);
     if (gen !== PAPER_GEN) return;     // a newer render superseded this one
     const mby = m.got, iby = it.got, tried = { m: m.tried, i: it.tried };
@@ -4534,7 +4827,13 @@
     // with no lines) and lines are three facts; only a pid never fetched
     // (past the cap) stays undefined
     const lines = {}; for (const [pid, l] of lineSets) lines[pid] = l;
-    const aux = { votes: votesPlane, analytics, lines };
+    // the page's own meetings, in the order the blocks name them, and every
+    // meeting an issue the page is about took up — the search box searches
+    // inside exactly these
+    const pagePids = [...mpids];
+    for (const slug of islugs) for (const nd of (((iby[slug] || {}).timeline) || []))
+      if (nd && PAPER_REF.test(nd.pid || "") && !pagePids.includes(nd.pid)) pagePids.push(nd.pid);
+    const aux = { votes: votesPlane, analytics, lines, meta: metaPlane, towns: townsPlane, pids: pagePids };
     // the on-page editor (specs/23 A3): the DRAFT, in the studio, renders
     // as itself with the arranging chrome on it — a handle, ↑ ↓, ✕ per
     // block, the title in place, an insertion point between blocks. A
@@ -4546,6 +4845,12 @@
     el.style.setProperty("--site", JSON.stringify(location.origin));
     if (editing) {
       setTimeout(pvShow, 0);   // the stage's mark on a reel row survives the repaint
+      // the municipalities, for the scoped blocks' frames (one cached fetch
+      // of the towns plane — an edition path); the template's questions,
+      // for the paragraphs' placeholders and the desk
+      const ed = (await getJSON(`${BASE}/towns.json`)) || { towns: [] }; if (gen !== PAPER_GEN) return;
+      PAPER_TOWNS = (ed.towns || []).map(x => String((x && x.town) || "")).filter(Boolean);
+      ED_ASKS = ((TEMPLATES[doc.tpl] || {}).asks || []).length ? TEMPLATES[doc.tpl].asks : DESK_PROMPTS;
       // the draft may have moved under the awaits (a keystroke on this
       // page's own title or note, another tab): paint what stands NOW. A
       // changed shape starts over from the fresh draft; a changed title or
@@ -4561,32 +4866,86 @@
         + edRow(withLayoutHTML(renderPaperBlock(b, mby, iby, tried, aux) || paperGone("a block"), b, mby, iby), b, i, n, paired.has(i)))
         .join("") + edSlot(n);
       const keep = captureEdFocus(el) || captureEdPanel(el);
-      el.innerHTML = edHead(doc) + rows;
+      el.innerHTML = edHead(doc) + `<div class="cz-edgrid">${edShelf()}<div class="cz-edpage">${rows}</div>${edDesk(doc, mby)}</div>`;
       wireEditor(el);
+      bsEditorPage();
       restoreEdFocus(el, PAGE_FOCUS || keep); PAGE_FOCUS = null;
       return;
     }
-    const head = `<header class="phead">
+    // the kicker says what the page is made of, never who made it (specs/29:
+    // the record keeps no reader identity — a front page is judged by its
+    // receipts); the labels count what is the record's and what is the writer's
+    const made = bsMadeFrom(doc, mby, iby);
+    const head = `<header class="phead bs-phead">
+        <p class="pb-kick">${esc(made.kind)}${made.towns.length === 1 ? ` · ${esc(made.towns[0])}` : ""}${made.pids.length ? ` · made from ${nOf(made.pids.length, "meeting", "meetings")}` : ""} · ${from === "draft" ? "your draft" : from === "stored" ? "shared as a short link" : "shared as a link"} · the writer is not named, by design</p>
         <h2 class="ptitle">${esc(printTitle(doc.title))}</h2>
         <p class="pfrom">${from === "draft"
-          ? "your draft — it lives in this browser. ✎ open the studio to edit it here; share it from the panel as a link or a file"
+          ? "your draft — it lives in this browser. EDIT, in the top bar, opens it in the editor; share it from there as a link or a file"
           : from === "stored"
             ? "served from the share store — content-addressed and read-only; the editor holds the original"
             : "carried whole in the link you followed — no server held it"}</p>
+        ${made.labels.length ? `<p class="pb-labels">${made.labels.map(l => `<span>${esc(l)}</span>`).join("")}</p>` : ""}
       </header>`;
     const blocks = paintLayouts(doc.blocks.map(b =>
       [b, renderPaperBlock(b, mby, iby, tried, aux)]).filter(x => x[1]), mby, iby);
+    // the foot says whose each part is; a page someone else shared carries
+    // the door back into writing — the same receipts, the reader's own words
+    const foot = blocks ? `<footer class="pb-foot"><p>${esc(made.foot)} · <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="license">CC BY-SA 4.0</a></p>${from !== "draft"
+      ? `<p class="pb-door"><span class="pb-door-k">Disagree? Add to it?</span><b>Make your own from the same receipts</b><a class="pb-door-go" href="${BASE}/p#edit&amp;copy=${encodeURIComponent(encodePaperQS(doc))}">Start from this front page →</a></p>` : ""}</footer>` : "";
     // a title-only paper is a sanctioned form — say what it is, not that its
     // (nonexistent) blocks were curated away
     setTimeout(pvShow, 0);     // the stage's mark on a reel row survives the repaint
-    el.innerHTML = head + (blocks
-      || (doc.blocks.length
+    el.innerHTML = head + (blocks ? blocks + foot : (doc.blocks.length
         ? `<p class="hint">This paper’s blocks aren’t in this pressing of the
             record — its meetings or issues may have been curated away. The
             <a href="${BASE}/">record itself</a> is one link up.</p>`
         : `<p class="hint">This paper is a title so far — its editor hasn’t
             added stories or reels yet. The <a href="${BASE}/">record
             itself</a> is one link up.</p>`));
+  }
+  /* what a page is made of, read off its blocks and the planes this render
+     fetched: the kind of front page (by its lead), the towns of its meetings,
+     its meetings, and the labels the head carries — who wrote which part */
+  function bsMadeFrom(doc, mby, iby) {
+    iby = iby || {};
+    const pids = [];
+    for (const b of doc.blocks) {
+      const ps = b.kind === "reel" ? b.clips.map(c => c.pid) : (b.pid ? [b.pid] : []);
+      for (const pid of ps) if (!pids.includes(pid)) pids.push(pid);
+    }
+    // the kind is claimed only where the shape bears it out — one meeting
+    // means one; a page that opens on the record's strip is "the record,
+    // over time", whatever template it began as
+    const first = doc.blocks[0] || {};
+    const kind = (first.kind === "lead" || (first.kind === "story" && first.story === "meeting" && first.layout === "lead")) && pids.length === 1 ? "One meeting"
+      : first.kind === "story" && first.story === "issue" ? (doc.blocks[1] && doc.blocks[1].kind === "chart" && doc.blocks[1].chart === "ledger" ? "A vote and its history" : "An issue over time")
+      : first.kind === "names" && first.who ? (first.who.startsWith("l-") ? "A place on the record" : first.who.startsWith("o-") ? "An organization on the record" : "A person on the record")
+      : first.kind === "strip" && first.town && doc.blocks[1] && doc.blocks[1].kind === "strip" && doc.blocks[1].town && doc.blocks[1].town !== first.town ? "Two towns, side by side"
+      : first.kind === "strip" || first.kind === "threads" ? "The record, over time"
+      : first.kind === "chart" && first.chart === "votes" && !first.pid ? "The roll calls, watched"
+      : "A front page";
+    const towns = [...new Set(pids.map(pid => (mby[pid] || {}).town || "").filter(Boolean))];
+    const paras = doc.blocks.filter(b => b.kind === "note" && b.text.trim())
+      .reduce((n, b) => n + b.text.trim().split(/\n+/).filter(x => x.trim()).length, 0);
+    // a reel's clips are clips — a cut that matches no scored moment is not a moment
+    const clips = doc.blocks.filter(b => b.kind === "reel").reduce((n, b) => n + b.clips.length, 0);
+    // the model's parts, counted and named: readings drafted by a model, and
+    // issues a model named (the issue plane's name_origin, as the issue page
+    // labels it) — the head and the foot say each, or say there were none
+    const readings = doc.blocks.filter(b => b.kind === "reading" && b.pid && mby[b.pid]
+      && /^ai:/.test(String((((mby[b.pid].analysis || {}).draft) || {}).origin || ""))).length;
+    const named = new Set(doc.blocks.map(b => b.slug).filter(slug => slug && iby[slug]
+      && /^ai:/.test(String(iby[slug].name_origin || "")))).size;
+    const labels = ["counted by the record"];
+    if (paras) labels.push(`${nOf(paras, "paragraph", "paragraphs")} by the writer`);
+    if (clips) labels.push(`reel: ${nOf(clips, "clip", "clips")}, cited`);
+    if (readings) labels.push(`${nOf(readings, "reading", "readings")} drafted by a model, labeled`);
+    if (named) labels.push(`${nOf(named, "issue", "issues")} named by a model, labeled`);
+    const model = [];
+    if (readings) model.push(`${nOf(readings, "reading was", "readings were")} drafted by a model`);
+    if (named) model.push(`${nOf(named, "issue’s name is", "issues’ names are")} a model’s`);
+    const foot = `the counts and the pictures${clips ? " and the reel" : ""} are the record’s${paras ? " · the paragraphs are the writer’s" : ""} · ${model.length ? model.join(" and ") + " — each says so where it stands" : "nothing here was written by a model"}`;
+    return { kind, pids, towns, labels, foot };
   }
   /* a block's section-head form (layout "head"): its name over a rule —
      a story's title linked into the record, a note's first line, a chart's
@@ -4615,7 +4974,10 @@
     } else if (b.kind === "digest") {
       const it = iby[b.slug]; if (!it) return null;
       text = `what changed — ${it.name || b.slug}`; href = `${BASE}/i/${b.slug}`;
-    }
+    } else if (b.kind === "lead") {
+      const m = mby[b.pid]; if (!m) return null;
+      text = m.title || b.pid; href = `${BASE}/m/${b.pid}`;
+    } else if (BS_KINDS.includes(b.kind)) text = blockLabel(b).replace(/^\S+ /, "");
     if (!text) return null;
     const inner = href ? `<a href="${esc(href)}">${esc(text)}</a>` : esc(text);
     return `<h3 class="pb-head">${inner}</h3>`;
@@ -4749,7 +5111,14 @@
       <p class="pb-chartsrc">computed from the issue’s own timeline when this paper rendered${dated.length ? (undated ? ` — ${undated} undated appearance${undated === 1 ? "" : "s"} not ranked here` : "") : " — none of its appearances is dated, so its last ones stand here, latest-added first"} — the full long view reads on the issue’s page</p>
     </section>`;
   }
+  /* one block, drawn — or, when a plane holds a shape this reader cannot
+     draw, one honest sentence in its place: a throw would take the whole
+     page down with it (decodeReel's law, at the render) */
   function renderPaperBlock(b, mby, iby, tried, aux) {
+    try { return renderBlockInner(b, mby, iby, tried, aux); }
+    catch (e) { return paperDark(`a ${esc(String((b && b.kind) || "block"))} block`, "its plane held a shape this reader could not draw"); }
+  }
+  function renderBlockInner(b, mby, iby, tried, aux) {
     tried = tried || { m: new Set(), i: new Set() };
     aux = aux || {};
     if (b.kind === "note") {
@@ -4757,16 +5126,24 @@
       // only the editor's own draft can hold an empty note (no traveling
       // form carries one) — say what it is instead of rendering a void
       if (!text) return `<section class="pb-note pb-note-empty">
-        <span class="kicker">the editor’s note</span>
-        <p class="hint">an empty note — write it in the studio panel</p></section>`;
+        <span class="kicker">what it means — the writer</span>
+        <p class="hint">an empty paragraph — press EDIT and write it</p></section>`;
       const paras = text.split(/\n+/).map(s => `<p>${esc(s)}</p>`).join("");
-      // labeled out loud: a note is the one block that is the EDITOR's words,
-      // not the record's — a reader must never mistake the two
-      return `<section class="pb-note"><span class="kicker">the editor’s note</span>
+      // labeled out loud: a note is the one block that is the WRITER's words,
+      // not the record's — a reader must never mistake the two (board 6:
+      // "What it means — the writer")
+      return `<section class="pb-note"><span class="kicker">what it means — the writer</span>
         ${paras}</section>`;
     }
     if (b.kind === "chart") return renderChartBlock(b, mby, iby, tried, aux);
     if (b.kind === "reading") return renderReading(b, mby, iby, tried);
+    // specs/29: the broadsheet's blocks
+    if (b.kind === "lead") return renderLead(b, mby, tried);
+    if (b.kind === "week") return renderWeek(b, aux);
+    if (b.kind === "threads") return renderThreads(b, aux);
+    if (b.kind === "strip") return renderStrip(b, aux);
+    if (b.kind === "names") return renderNames(b, aux);
+    if (b.kind === "search") return renderSearchBox(b, aux);
     if (b.kind === "quote") return renderQuote(b, mby, { ...aux, tried });
     if (b.kind === "doc") return renderDoc(b, mby, tried);
     if (b.kind === "digest") return renderDigest(b, iby, tried);
@@ -4792,7 +5169,9 @@
         + `<div class="mc-body"><span class="chip">issue</span>`
         + `<b>${esc(it.name || b.slug)}</b>`
         + `<span class="mc-meta">${it.n_meetings || 0} meeting${it.n_meetings === 1 ? "" : "s"}`
-        + (span.length ? ` · ${esc(span.join(" — "))}` : "") + `</span>`
+        + (span.length ? ` · ${esc(span.join(" — "))}` : "")
+        // the issue page's own label, carried: a model named this issue
+        + (/^ai:/.test(String(it.name_origin || "")) ? ` · <span class="pb-origin">named by a model</span>` : "") + `</span>`
         + `</div></a>`;
     }
     if (b.kind === "reel") {
@@ -4840,6 +5219,255 @@
     }
     return "";
   }
+  /* ---- the broadsheet's blocks (specs/29 P1) -------------------------------
+     Six blocks in the board's grammar, every one computed HERE from the
+     record's own planes — the meeting plane, the index (search/meta.json),
+     analytics.json, towns.json — in the paper palette (ink, rust, the
+     municipality's colour), a receipt on every mark and an honest sentence
+     where a plane did not arrive. The words that count things follow the
+     press's (web/story.py hours_prose, day_name) so a page reads the same
+     whether the press or the reader set it. */
+  const PB = { ink: "#191712", ink2: "#4B473E", muted: "#6F6A5B", rule: "#D9D1BF", rust: "#B23A1D", card: "#FBF9F4" };   // web/charts.py's constants — a twin holds them equal
+  const BS_ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+    "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+  const BS_TENS = ["", "", "twenty", "thirty", "forty", "fifty"];
+  const bsNumberWords = n => { n = Math.floor(+n || 0);
+    if (n < 20) return BS_ONES[n]; if (n < 60) return BS_TENS[Math.floor(n / 10)] + (n % 10 ? `-${BS_ONES[n % 10]}` : ""); return String(n); };
+  /* "two hours and forty-six minutes" — web/story.py hours_prose */
+  function bsHoursProse(seconds) {
+    const s = Math.floor(+seconds || 0), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    const hw = h ? `${bsNumberWords(h)} hour${h === 1 ? "" : "s"}` : "", mw = m ? `${bsNumberWords(m)} minute${m === 1 ? "" : "s"}` : "";
+    return hw && mw ? `${hw} and ${mw}` : hw || mw || "under a minute";
+  }
+  /* "2 h 46 min" — web/story.py hours_words */
+  const bsHoursShort = seconds => { const s = Math.floor(+seconds || 0), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return h && m ? `${h} h ${m} min` : h ? `${h} h` : `${m} min`; };
+  const BS_DRIFT = { rising: "rising", fading: "fading", steady: "steady through the night" };
+  const bsMoneyLabel = s => String(s || "").trim().replace(/[.,;: ]+$/, "");
+  const BS_ARTIFACTS = new Set(["clears throat", "music", "applause", "laughter", "mhm", "um", "uh", "inaudible", "crosstalk", "foreign", "silence",
+    "good evening", "good morning", "good afternoon", "good night", "thank you", "thanks", "hello", "welcome", "okay", "yeah", "everybody", "everyone",
+    "next slide", "point of order", "roll call", "madam president", "mr president", "mister president", "madam chair", "mr chair",
+    "madam clerk", "mr clerk", "madam mayor", "mr mayor", "councilor", "council president"]);   // web/charts.py ARTIFACTS
+  /* the ISO day n days before a day — the week's window (web/broadsheet.py week_section) */
+  const bsDaysBefore = (date, n) => { const m = /^(\d{4})-(\d\d)-(\d\d)/.exec(String(date || "")); if (!m) return "";
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] - n)); return isNaN(d) ? "" : d.toISOString().slice(0, 10); };
+  /* the three moments that decided a meeting: the loudest roll call,
+     decision or pushback, never two from one second — the template's rule */
+  function bsTopMoments(m, n) {
+    const top = [], secs = new Set();
+    for (const mo of (m.moments || [])
+        .filter(mo => mo && typeof mo.t === "number" && ["vote", "decision", "tension"].includes(mo.kind))
+        .sort((a, c) => (+c.score || 0) - (+a.score || 0))) {
+      if (secs.has(Math.floor(mo.t))) continue;
+      secs.add(Math.floor(mo.t)); top.push(mo);
+      if (top.length === n) break;
+    }
+    return top;
+  }
+  /* pid → town, from the index this render fetched (empty when it did not) */
+  const bsTownBy = meta => { const by = Object.create(null);
+    for (const m of (Array.isArray(meta) ? meta : [])) if (m && m.pid) by[m.pid] = String(m.town || ""); return by; };
+  /* a scoped block's municipality: the town whose slug the block names, off
+     the towns plane. Three honest answers: no scope; a town; or "not in this
+     pressing" — and a towns plane that did not load is said as that, with
+     every town shown, never a silent guess (a block scoped to a town the
+     index cannot place its meetings in shows every town too, and says so) */
+  function bsScopeOf(b, aux) {
+    if (!b.town) return { town: "", note: "" };
+    const towns = aux.towns && Array.isArray(aux.towns.towns) ? aux.towns.towns.map(t => String((t && t.town) || "")) : null;
+    if (!towns) return { town: "", note: "the towns plane didn’t load here — every town shows" };
+    const town = towns.find(t => bsSlug(t) === b.town);
+    if (!town) return { gone: paperGone(`a municipality (${b.town})`) };
+    if (!Array.isArray(aux.meta)) return { town: "", note: `the record’s index didn’t load here, so ${town} could not be told apart — every town shows` };
+    return { town, note: "" };
+  }
+  const bsTownTail = sc => sc.town ? ` — ${esc(sc.town)}` : "";
+  /* the lead story: the meeting told large — its still, its counted lede
+     (the tape's length, the lens that framed it, the roll calls read, the
+     money named), the three moments that decided it, every one a receipt */
+  function renderLead(b, mby, tried) {
+    const m = mby[b.pid];
+    if (!m) return tried.m.has(b.pid) ? paperGone(`a meeting (${b.pid})`) : paperBudget("the lead story");
+    const href = `${BASE}/m/${esc(b.pid)}`, town = m.town || "", an = m.analysis || {};
+    const pic = m.still
+      ? `<img src="${esc(m.still)}" alt="" loading="lazy" width="960" height="540">`
+      : `<span class="bs-nostill" style="background:${bsTownLight(town)}"></span>`;
+    const fr = an.framing || {}, ftot = Math.floor(+fr.total || 0);
+    const lenses = (fr.lenses || []).filter(l => l && +l.count > 0).slice()
+      .sort((a, c) => (+c.count - +a.count) || (String(a.lens) < String(c.lens) ? -1 : 1));
+    const parts = [`${bsHoursProse(m.duration)} of tape`];
+    if (lenses.length && ftot) parts.push(`of ${ftot} words the record files under a lens, ${Math.floor(+lenses[0].count)} were ${esc(lenses[0].lens)} and ${BS_DRIFT[lenses[0].drift] || "steady"}`);
+    const nv = (m.votes || []).length;
+    if (nv) parts.push(`${nOf(nv, "roll call", "roll calls")} read from the tape`);
+    const money = ((an.entities || {}).money || []).filter(e => e && e.name).slice(0, 3).map(e => esc(bsMoneyLabel(e.name)));
+    if (money.length) parts.push(`money named: ${money.join(", ")}`);
+    const moments = bsTopMoments(m, 3).map(mo =>
+      `<li><a href="${href}#t${Math.floor(mo.t)}"><span class="ts">▶ ${hms(mo.t)}</span> <span class="pb-lead-q">“${esc(cut(String(mo.quote || ""), 140))}”</span> <span class="pb-rdtag">${esc(SHAPE_KINDS[mo.kind] || mo.kind || "moment")}</span></a></li>`).join("");
+    return `<article class="pb-leadstory" style="--town:${bsTown(town)}">
+      <a class="pb-lead-pic" href="${href}" aria-hidden="true" tabindex="-1">${pic}</a>
+      <div class="pb-lead-body">
+        <span class="pb-kick">${esc([town, m.body, tpDay(m.date)].filter(Boolean).join(" · "))}</span>
+        <h3 class="pb-lead-t"><a href="${href}">${esc(m.title || b.pid)}</a></h3>
+        <p class="pb-lead-lede">${parts.map(x => x.charAt(0).toUpperCase() + x.slice(1)).join(". ")}.</p>
+        ${moments ? `<ol class="pb-lead-moments" aria-label="the moments that decided it">${moments}</ol>` : ""}
+        <p class="pb-chartsrc">counted from the meeting’s own pressed plane — every line opens the tape where it was said. <a href="${href}">the meeting</a> holds the whole night</p>
+      </div></article>`;
+  }
+  /* this week: the seven days to the record's latest meeting, as cards with
+     their stills — or, when that week holds fewer than three, the latest
+     five (the front page's own rule, web/broadsheet.py week_section) */
+  function renderWeek(b, aux) {
+    const sc = bsScopeOf(b, aux); if (sc.gone) return sc.gone;
+    const kicker = `this week on the record${bsTownTail(sc)}`;
+    if (!Array.isArray(aux.meta))
+      return chartUnfetched(kicker, `the record’s index didn’t load here — <a href="${BASE}/">the front page</a> keeps the week`);
+    const rows = aux.meta.filter(m => m && PAPER_REF.test(m.pid || "") && TP_DAY.test(m.date || "") && (!sc.town || String(m.town || "") === sc.town))
+      .sort((a, c) => (c.date > a.date ? 1 : c.date < a.date ? -1 : 0) || (c.pid > a.pid ? 1 : c.pid < a.pid ? -1 : 0));
+    if (!rows.length)
+      return chartShell(kicker, "", `<p class="hint">The record holds no dated meeting${sc.town ? ` for ${esc(sc.town)}` : ""} yet.</p>`, "", "");
+    const since = bsDaysBefore(rows[0].date, 7);
+    let week = rows.filter(m => m.date > since);
+    const fell = week.length < 3;
+    if (fell) week = rows.slice(0, 5);
+    const inWeek = week.length;
+    week = week.slice(0, 8);
+    const cards = week.map(m => `<a class="mcard bs-week-card pb-wkcard" href="${BASE}/m/${esc(m.pid)}" style="--town:${bsTown(m.town)}">${m.still
+        ? `<img src="${BASE}/stills/${encodeURIComponent(m.pid)}.jpg" alt="" loading="lazy" width="480" height="270">`
+        : `<span class="bs-nostill" style="background:${bsTownLight(m.town)}"></span>`}<span class="bs-wkbody">
+      <span class="bs-wkkick">${esc([m.town, m.body].filter(Boolean).join(" · "))}</span><b>${esc(m.title || m.pid)}</b>
+      <span class="bs-wkmeta">${esc(tpDay(m.date))} · ${bsHoursShort(m.duration)}</span></span></a>`).join("");
+    return chartShell(fell ? `the latest on the record${bsTownTail(sc)}` : kicker,
+      (fell ? `the record’s latest ${nOf(week.length, "meeting", "meetings")}` : `the seven days to ${esc(tpDay(rows[0].date))} — ${inWeek > week.length ? `the newest ${week.length} of ${nOf(inWeek, "meeting", "meetings")}` : nOf(week.length, "meeting", "meetings")}`) + (sc.note ? ` · ${esc(sc.note)}` : ""),
+      `<div class="mcards bs-weekrow pb-week">${cards}</div>`, "",
+      `from the record’s own index when this page rendered — <a href="${BASE}/">the front page</a> keeps the week`);
+  }
+  /* threads: the six widest recurring topics as small multiples — what
+     keeps coming back, how often, and when, month by month; each tells its
+     story on the search page (web/broadsheet.py threads_section) */
+  function renderThreads(b, aux) {
+    const sc = bsScopeOf(b, aux); if (sc.gone) return sc.gone;
+    const kicker = `threads — what keeps coming back${bsTownTail(sc)}`;
+    const an = aux.analytics;
+    if (!an) return chartUnfetched(kicker, `the record’s analytics plane didn’t load here — <a href="${BASE}/analytics">the record, drawn</a> reads in place`);
+    const townBy = bsTownBy(aux.meta);
+    const inTown = r => !sc.town || townBy[r.pid] === sc.town;
+    const tops = (an.topics || []).filter(t => t && String(t.topic || "").trim() && !BS_ARTIFACTS.has(String(t.topic).trim().toLowerCase()))
+      .map(t => ({ name: String(t.topic).trim(), count: Math.floor(+t.count || 0),
+                   meetings: (t.meetings || []).filter(x => x && PAPER_REF.test(x.pid || "") && inTown(x)) }))
+      .filter(t => t.meetings.length)
+      .sort((a, c) => c.meetings.length - a.meetings.length || c.count - a.count || (a.name < c.name ? -1 : 1)).slice(0, 6);
+    if (!tops.length)
+      return chartShell(kicker, "", `<p class="hint">Nothing recurs${sc.town ? ` in ${esc(sc.town)}` : ""} yet — the record is young.</p>`, "",
+        `from <a href="${BASE}/analytics">the record, drawn</a>`);
+    const months = tpMonthRange(tops.flatMap(t => t.meetings.map(x => x.date)).filter(tpIsMonth).map(d => String(d).slice(0, 7)));
+    const cards = tops.map(t => {
+      const counts = months.map(mo => t.meetings.filter(x => String(x.date || "").slice(0, 7) === mo).length);
+      const q = `${BASE}/s?q=${encodeURIComponent(t.name)}${sc.town ? `&town=${encodeURIComponent(sc.town)}` : ""}`;
+      // the plane's mention count is the whole record's and a sum over each
+      // meeting's most-said topics: inside a town it cannot be rescoped, so
+      // it is not shown; elsewhere it reads "at least"
+      return `<a class="pb-thread" href="${q}"><b>${esc(t.name)}</b><span class="pb-thread-n">${sc.town ? "" : `at least ${nOf(t.count, "mention", "mentions")} · `}${nOf(t.meetings.length, "meeting", "meetings")}</span>
+        ${bsSpark(months, counts, PB.ink, true)}<span class="pb-thread-go">tell its story →</span></a>`; }).join("");
+    const twin = `<thead><tr><th>thread</th>${sc.town ? "" : "<th>mentions, at least</th>"}<th>meetings</th></tr></thead><tbody>`
+      + tops.map(t => `<tr><td>${esc(t.name)}</td>${sc.town ? "" : `<td>${t.count}</td>`}<td>${t.meetings.length}</td></tr>`).join("") + `</tbody>`;
+    return chartShell(kicker, `the ${tops.length === 1 ? "one thread" : `${bsNumberWords(tops.length)} widest threads`}, by the meetings that took them up${months.length ? ` — ${TP_MON[+months[0].slice(5, 7)]} to ${TP_MON[+months[months.length - 1].slice(5, 7)]}` : ""}${sc.note ? ` · ${esc(sc.note)}` : ""}`,
+      `<div class="pb-threads">${cards}</div>`, twin,
+      `counted from <a href="${BASE}/analytics">the record, drawn</a> — a mention count is summed over each meeting’s most-said topics, so it is a floor; every thread opens its search, told as a story`);
+  }
+  /* how they talked: one bar per meeting, in date order, its eight lens
+     shares side by side in the analyzer's own colours — the record's
+     framing, meeting by meeting (web/charts.py framing_strip) */
+  function renderStrip(b, aux) {
+    const sc = bsScopeOf(b, aux); if (sc.gone) return sc.gone;
+    const kicker = `how they talked — the lens strip${bsTownTail(sc)}`;
+    const an = aux.analytics;
+    if (!an) return chartUnfetched(kicker, `the record’s analytics plane didn’t load here — <a href="${BASE}/analytics">the record, drawn</a> reads in place`);
+    const townBy = bsTownBy(aux.meta), order = Array.isArray(an.lens_order) ? an.lens_order : [], color = an.lens_color || {};
+    const rows = (an.framing || []).filter(r => r && PAPER_REF.test(r.pid || "") && Math.floor(+r.total || 0) > 0)
+      .map(r => ({ ...r, town: townBy[r.pid] || "" })).filter(r => !sc.town || r.town === sc.town)
+      .sort((a, c) => (String(a.date || "") < String(c.date || "") ? -1 : String(a.date || "") > String(c.date || "") ? 1 : 0) || (a.pid < c.pid ? -1 : 1));
+    if (!rows.length || !order.length)
+      return chartShell(kicker, "", `<p class="hint">The framing strip needs a read meeting${sc.town ? ` in ${esc(sc.town)}` : ""}.</p>`, "",
+        `from <a href="${BASE}/analytics">the record, drawn</a>`);
+    const legend = `<p class="pb-lenskey">${order.map(l => `<span><i style="background:${esc(color[l] || PB.ink)}"></i>${esc(l)}</span>`).join("")}</p>`;
+    const bars = rows.map(r => {
+      const lz = r.lenses || {}, total = Math.max(1, Math.floor(+r.total || 0));
+      const segs = order.map(l => { const n = Math.floor(+lz[l] || 0); return n ? `<i style="width:${(100 * n / total).toFixed(1)}%;background:${esc(color[l] || PB.ink)}" title="${esc(l)}: ${n}"></i>` : ""; }).join("");
+      const said = order.map(l => `${l} ${Math.floor(+lz[l] || 0)}`).join(", ");
+      return `<a class="pb-striprow" href="${BASE}/m/${esc(r.pid)}#framing" style="--town:${bsTown(r.town)}">
+        <span class="pb-strip-d">${esc(bsDayShort(r.date))}</span><span class="pb-strip-b">${esc([r.town, r.body].filter(Boolean).join(" · "))}</span>
+        <span class="pb-strip-bar" role="img" aria-label="${esc(r.title || r.pid)} — ${esc(said)}">${segs}</span><span class="pb-strip-n">${total}</span></a>`; }).join("");
+    const twin = `<thead><tr><th>meeting</th>${order.map(l => `<th>${esc(l)}</th>`).join("")}<th>words</th></tr></thead><tbody>`
+      + rows.map(r => `<tr><td>${esc(bsDayShort(r.date))} · ${esc(r.body || r.pid)}</td>${order.map(l => `<td>${Math.floor(+(r.lenses || {})[l] || 0)}</td>`).join("")}<td>${Math.floor(+r.total || 0)}</td></tr>`).join("") + `</tbody>`;
+    return chartShell(kicker, `${nOf(rows.length, "meeting", "meetings")} in date order — each bar is one night’s words the record files under a lens, its eight shares side by side${sc.note ? ` · ${esc(sc.note)}` : ""}`,
+      legend + `<div class="pb-strip">${bars}</div>`, twin,
+      `counted from <a href="${BASE}/analytics">the record, drawn</a> — every bar opens its meeting’s framing`);
+  }
+  /* who and where: the names and places the record keeps hearing — two
+     columns, each name a search told as a story — or ONE of them (who): when
+     it was named, how often, in which meetings, month by month */
+  function renderNames(b, aux) {
+    const sc = bsScopeOf(b, aux); if (sc.gone) return sc.gone;
+    const an = aux.analytics;
+    const kicker = b.who ? "on the record" : `who and where${bsTownTail(sc)}`;
+    if (!an) return chartUnfetched(kicker, `the record’s analytics plane didn’t load here — <a href="${BASE}/analytics">the record, drawn</a> reads in place`);
+    const townBy = bsTownBy(aux.meta);
+    const inTown = r => !sc.town || townBy[r.pid] === sc.town;
+    const names = (an.names || []).filter(n => n && n.name && typeof n.name === "string")
+      .map(n => ({ name: n.name, kind: String(n.kind || "people"), count: Math.floor(+n.count || 0), slug: String(n.slug || bsWho(n.kind, n.name)),
+                   meetings: (n.meetings || []).filter(x => x && PAPER_REF.test(x.pid || "") && inTown(x)) }))
+      .filter(n => n.meetings.length);
+    const searchOf = n => `${BASE}/s?q=${encodeURIComponent(n.name)}${sc.town ? `&town=${encodeURIComponent(sc.town)}` : ""}`;
+    const KIND = { people: "a person", places: "a place", organizations: "an organization" };
+    if (b.who) {
+      const one = names.find(n => n.slug === b.who);
+      if (!one) return paperGone(`a name (${b.who})`);
+      const dated = one.meetings.filter(x => tpIsMonth(x.date)).slice().sort((a, c) => (a.date < c.date ? -1 : a.date > c.date ? 1 : 0));
+      const months = tpMonthRange(dated.map(x => String(x.date).slice(0, 7)));
+      const counts = months.map(mo => dated.filter(x => String(x.date).slice(0, 7) === mo).length);
+      const sorted = one.meetings.slice().sort((a, c) => (String(c.date || "") > String(a.date || "") ? 1 : String(c.date || "") < String(a.date || "") ? -1 : 0));
+      // a time of 0:00 is a plane with no time for the mention, not a moment
+      const rows = sorted.slice(0, 12).map(x =>
+        `<a class="pb-rdrow" href="${BASE}/m/${esc(x.pid)}${+x.t > 0 ? `#t${Math.floor(+x.t)}` : ""}">${+x.t > 0 ? `<span class="ts">${hms(+x.t)}</span>` : ""}<span class="pb-rdtag">${esc(bsDayShort(x.date))}</span> ${esc(townBy[x.pid] || "")}${townBy[x.pid] ? " · " : ""}${+x.t > 0 ? `first named at ${hms(+x.t)}` : "named that night"}</a>`).join("");
+      // the count is a sum over the meetings where the name was among the
+      // most-said — a floor, said as one; inside a town it cannot be rescoped
+      const said = sc.town ? `named in ${nOf(one.meetings.length, "meeting", "meetings")}` : `named at least ${nOf(one.count, "time", "times")} across ${nOf(one.meetings.length, "meeting", "meetings")}`;
+      return `<section class="pb-chart pb-who" style="--town:${PB.ink}">
+        <div class="sectionhead"><span class="kicker">${esc(KIND[one.kind] || "a name")} on the record — ${esc(one.name)}</span></div>
+        <p class="pb-chartsub">${said}${months.length ? `, ${TP_MON[+months[0].slice(5, 7)]} to ${TP_MON[+months[months.length - 1].slice(5, 7)]}` : ""}${sc.note ? ` · ${esc(sc.note)}` : ""}</p>
+        ${months.length ? `<div class="pb-who-spark">${bsSpark(months, counts, PB.ink)}</div>` : ""}
+        <div class="pb-rdpart"><span class="kicker">the meetings that named ${esc(one.kind === "people" ? "them" : "it")}${sorted.length > 12 ? ` — the latest twelve of ${nOf(sorted.length, "meeting", "meetings")}` : ""}</span>${rows}</div>
+        <p class="pb-chartsrc">read off the record’s names plane, which keeps each meeting’s most-said names — <a href="${searchOf(one)}">every line that says “${esc(one.name)}”</a>, counted exactly</p>
+      </section>`;
+    }
+    const col = (kind, label) => {
+      const list = names.filter(n => n.kind === kind).sort((a, c) => c.meetings.length - a.meetings.length || c.count - a.count || (a.name < c.name ? -1 : 1)).slice(0, 8);
+      if (!list.length) return "";
+      const months = tpMonthRange(list.flatMap(n => n.meetings.map(x => x.date)).filter(tpIsMonth).map(d => String(d).slice(0, 7)));
+      return `<div class="pb-namescol"><span class="kicker">${label}</span>${list.map(n => `<a class="pb-name" href="${searchOf(n)}"><b>${esc(n.name)}</b><span class="pb-name-n">${nOf(n.meetings.length, "meeting", "meetings")}${sc.town ? "" : ` · ${n.count}+ times`}</span>${bsSpark(months, months.map(mo => n.meetings.filter(x => String(x.date || "").slice(0, 7) === mo).length), PB.ink, true)}</a>`).join("")}</div>`;
+    };
+    const body = col("people", "who") + col("places", "where");
+    if (!body) return chartShell(kicker, "", `<p class="hint">The record has not heard a name twice${sc.town ? ` in ${esc(sc.town)}` : ""} yet.</p>`, "", `from <a href="${BASE}/analytics">the record, drawn</a>`);
+    const twin = `<thead><tr><th>name</th><th>kind</th><th>meetings</th>${sc.town ? "" : "<th>times, at least</th>"}</tr></thead><tbody>`
+      + names.slice().sort((a, c) => c.meetings.length - a.meetings.length || c.count - a.count).slice(0, 24).map(n => `<tr><td>${esc(n.name)}</td><td>${esc(n.kind)}</td><td>${n.meetings.length}</td>${sc.town ? "" : `<td>${n.count}</td>`}</tr>`).join("") + `</tbody>`;
+    return chartShell(kicker, `the names and places the record keeps hearing, by the meetings that named them${sc.note ? ` · ${esc(sc.note)}` : ""}`,
+      `<div class="pb-names">${body}</div>`, twin,
+      `read off <a href="${BASE}/analytics">the record, drawn</a>, which keeps each meeting’s most-said names — a plus means at least; a name may be misheard; every one opens its search`);
+  }
+  /* the search box: readers search inside this page's own meetings — a real
+     form to the search page, the page's pids in a hidden field (the search
+     page reads m=); nothing is stored but the kind */
+  function renderSearchBox(b, aux) {
+    const all = (aux.pids || []).filter(pid => PAPER_REF.test(pid));
+    const pids = all.slice(0, PAPER_MAX_BLOCKS);
+    const n = pids.length;
+    return `<form class="pb-search" action="${BASE}/s" method="get" role="search">
+      <span class="kicker" id="pb-search-k${(aux.searchN = (aux.searchN || 0) + 1)}">search inside this front page’s meetings</span>
+      <span class="pb-searchrow"><input name="q" type="search" autocomplete="off" aria-labelledby="pb-search-k${aux.searchN}" placeholder="${n ? `a word said in ${n === 1 ? "this meeting" : `these ${bsNumberWords(n)} meetings`}` : "a word said on the record"}">
+        ${n ? `<input type="hidden" name="m" value="${esc(pids.join(","))}"><input type="hidden" name="town" value="">` : ""}<button type="submit" class="btn">Find</button></span>
+      <span class="pb-chartsrc">${n ? (all.length > n ? `the first ${n} of ${nOf(all.length, "meeting", "meetings")} this page cites` : `${nOf(n, "meeting", "meetings")} this page cites`) : "the whole record"} · ${n ? "searched from the edition’s own index, in your browser — a page’s scope never reaches the record’s server" : "searched from the edition’s own index; when the record’s server answers, it sees the words you typed and nothing about you"}</span>
+    </form>`;
+  }
   /* ---- the chart blocks (specs/21 P2) --------------------------------------
      Four pictures, all computed HERE from the record's own pressed planes —
      a paper carries which chart, never the numbers. They wear the paper
@@ -4875,7 +5503,7 @@
     if (b.chart === "topics") return chartTopics(aux.analytics);
     if (b.chart === "framing" && !b.pid) return chartFramingRecord(aux.analytics);
     if (b.chart === "framing") return chartFramingMeeting(b, mby, tried);
-    if (b.chart === "reach") return chartReach(b, iby, tried);
+    if (b.chart === "reach") return chartReach(b, iby, tried, aux);
     return "";
   }
   /* votes over time — every roll call the record holds, one dot each,
@@ -4922,19 +5550,19 @@
           + (mark === "other"
             ? `<rect x="${r1(cx - dotR + 1)}" y="${r1(cy - dotR + 1)}" `
               + `width="${(dotR - 1) * 2}" height="${(dotR - 1) * 2}" rx="2" `
-              + `fill="#052e16" fill-opacity=".5"`
+              + `fill="${PB.ink}" fill-opacity=".5"`
             : `<circle cx="${cx}" cy="${cy}" r="${dotR}" `
-              + (mark === "pass" ? `fill="#052e16" fill-opacity=".82"`
-                                 : `fill="#ffffff" stroke="#052e16" stroke-width="2"`))
+              + (mark === "pass" ? `fill="${PB.ink}" fill-opacity=".82"`
+                                 : `fill="${PB.card}" stroke="${PB.rust}" stroke-width="2"`))
           + `><title>${esc(tip)}</title>`
           + (mark === "other" ? `</rect></a>` : `</circle></a>`);
       });
       const y = c.date.slice(0, 4);
       labels += `<text x="${cx}" y="${plotH + 14}" text-anchor="middle" `
-        + `font-size="10" fill="#475569">${chartDay(c.date)}</text>`;
+        + `font-size="10" fill="${PB.muted}">${chartDay(c.date)}</text>`;
       if (y && y !== prevYear) {
         labels += `<text x="${cx}" y="${plotH + 28}" text-anchor="middle" `
-          + `font-size="10" fill="#475569">${esc(y)}</text>`;
+          + `font-size="10" fill="${PB.muted}">${esc(y)}</text>`;
         prevYear = y;
       }
     });
@@ -4946,7 +5574,7 @@
       + `across ${plane.n_meetings} meetings; the table below carries every `
       + `motion and outcome">`
       + `<line x1="0" y1="${plotH + 0.5}" x2="${W}" y2="${plotH + 0.5}" `
-      + `stroke="#e2e8f0"/>` + marks + labels + `</svg>`;
+      + `stroke="${PB.rule}"/>` + marks + labels + `</svg>`;
     const twin = `<thead><tr><th>date</th><th>motion</th><th>outcome</th>
         <th>tally</th></tr></thead><tbody>`
       + votes.map(v =>
@@ -4970,7 +5598,7 @@
   }
   /* an issue's reach — its appearances, meeting by meeting; a bar is how
      many moments of that meeting the issue surfaced in. */
-  function chartReach(b, iby, tried) {
+  function chartReach(b, iby, tried, aux) {
     const it = iby[b.slug];
     if (!it) return tried.i.has(b.slug)
       ? paperGone(`an issue (${b.slug})`)
@@ -4983,40 +5611,16 @@
           meeting yet.</p>`, "",
         `from the record’s long view —
          <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>`);
-    const barW = 34, gap = 14, pad = 10, plotH = 110;
-    const maxB = Math.max(...tl.map(n => (n.beads || []).length), 1);
-    const W = pad * 2 + tl.length * (barW + gap) - gap, H = plotH + 36;
-    let marks = "", labels = "", prevYear = null;
-    tl.forEach((n, i) => {
-      const x = r1(pad + i * (barW + gap));
-      const nb = (n.beads || []).length;
-      const h = nb ? Math.max(6, r1(nb * (plotH - 22) / maxB)) : 3;
-      const y = r1(plotH - h);
-      const t0 = nb ? Math.floor(n.beads[0].t || 0) : 0;
-      const tip = `${n.date || "undated"} · ${n.body || n.title || n.pid} — `
-        + `${nb} moment${nb === 1 ? "" : "s"}`;
-      marks += `<a href="${BASE}/m/${esc(n.pid)}${nb ? `#t${t0}` : ""}"`
-        + ` aria-label="${esc(tip)}">`
-        + `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="2" `
-        + `fill="#052e16" fill-opacity="${nb ? ".82" : ".35"}">`
-        + `<title>${esc(tip)}</title></rect></a>`
-        + `<text x="${r1(x + barW / 2)}" y="${y - 5}" text-anchor="middle" `
-        + `font-size="11" fill="#0f172a">${nb}</text>`;
-      const yr = (n.date || "").slice(0, 4);
-      labels += `<text x="${r1(x + barW / 2)}" y="${plotH + 14}" `
-        + `text-anchor="middle" font-size="10" fill="#475569">${chartDay(n.date)}</text>`;
-      if (yr && yr !== prevYear) {
-        labels += `<text x="${r1(x + barW / 2)}" y="${plotH + 28}" `
-          + `text-anchor="middle" font-size="10" fill="#475569">${esc(yr)}</text>`;
-        prevYear = yr;
-      }
-    });
-    const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" `
-      + `xmlns="http://www.w3.org/2000/svg" role="group" aria-label="`
-      + `${esc(it.name || b.slug)} — appearances meeting by meeting; the `
-      + `table below carries the same counts">`
-      + `<line x1="0" y1="${plotH + 0.5}" x2="${W}" y2="${plotH + 0.5}" `
-      + `stroke="#e2e8f0"/>` + marks + labels + `</svg>`;
+    // the board's timeline (specs/29 board 6): the meetings that took it up
+    // as town-coloured dots on the months — the search page's own picture
+    // (bsTimeline); each dot opens the tape at the first bead. An undated
+    // node cannot sit on a month — the twin lists it, the picture cannot.
+    const townBy = bsTownBy(aux && aux.meta);
+    const rows = tl.filter(n => n && n.pid).map(n => ({ pid: n.pid, date: n.date || "", body: n.body || "", title: n.title || n.body || n.pid,
+      n: (n.beads || []).length, first_t: ((n.beads || [])[0] || {}).t || 0, town: townBy[n.pid] || "" }));
+    const undated = rows.filter(r => !tpIsMonth(r.date)).length;
+    const pic = bsTimeline(rows, "", 0, 0, "moment").replace(/<span class="kicker">[^<]*<\/span>/, `<span class="kicker">the meetings that took it up · click a dot${undated ? ` · ${nOf(undated, "undated appearance", "undated appearances")} in the table only` : ""}</span>`);
+    const svg = pic || `<p class="hint">Its appearances carry no dates the picture can place — the table below lists them.</p>`;
     const twin = `<thead><tr><th>date</th><th>meeting</th><th>moments</th>
         </tr></thead><tbody>`
       + tl.map(n => `<tr><td><a href="${BASE}/m/${esc(n.pid)}">
@@ -5027,7 +5631,7 @@
       `${it.n_meetings} meeting${it.n_meetings === 1 ? "" : "s"}`
         + (it.first_seen ? ` · first seen ${esc(it.first_seen)}` : "")
         + (it.last_seen ? ` · last ${esc(it.last_seen)}` : ""),
-      `<div class="pb-chartwrap">${svg}</div>`,
+      svg,
       twin,
       `from the record’s long view —
        <a href="${BASE}/i/${esc(b.slug)}">${esc(it.name || b.slug)}</a>
@@ -5039,6 +5643,11 @@
      deep green is measurement, slate is label; a receipt under every mark
      and a table twin where the picture is positional. */
   const nOf = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  /* the meeting plane's lists are CAPPED at press time (web/bake.py: twenty
+     decisions, twenty-four questions, ten moments of pushback) — a length at
+     the cap is "at least", never a count, and is said with a plus */
+  const BS_CAPS = { decisions: 20, questions: 24, tension: 10 };
+  const bsCapN = (list, cap) => { const n = (Array.isArray(list) ? list : []).length; return n >= cap ? `${n}+` : String(n); };
   const numbersStrip = cells => `<div class="pb-nums">` + cells.map(([n, label, href]) =>
     `<a class="pb-num" href="${href}"><b>${n}</b><span>${esc(label)}</span></a>`).join("") + `</div>`;
   /* the meeting in numbers / the issue in numbers: a strip of counted facts,
@@ -5051,9 +5660,9 @@
       const cells = [
         [Math.round((+m.duration || 0) / 60), "minutes", href],
         [(m.votes || []).length, "roll calls", href],
-        [(an.decisions || []).length, "decisions", href],
-        [(an.questions || []).length, "questions asked", href],
-        [(an.tension || []).length, "moments of pushback", href],
+        [bsCapN(an.decisions, BS_CAPS.decisions), "decisions", href],
+        [bsCapN(an.questions, BS_CAPS.questions), "questions asked", href],
+        [bsCapN(an.tension, BS_CAPS.tension), "moments of pushback", href],
         [(m.documents || []).length, "filings", href],
       ];
       return chartShell(`the meeting in numbers — ${esc(m.title || b.pid)}`, "",
@@ -5102,25 +5711,25 @@
       counts[kind] = (counts[kind] || 0) + 1;
       const tip = `${hms(mo.t)} · ${SHAPE_KINDS[kind]} — ${String(mo.quote || "").slice(0, 120)}`;
       const glyph = kind === "vote"
-        ? `<rect x="${r1(cx - 4)}" y="18" width="8" height="${axisY - 18}" rx="1" fill="#052e16" fill-opacity=".85"/>`
+        ? `<rect x="${r1(cx - 4)}" y="18" width="8" height="${axisY - 18}" rx="1" fill="${PB.ink}" fill-opacity=".85"/>`
         : kind === "decision"
-        ? `<path d="M${cx} 26 l7 14 h-14 z" fill="#052e16" fill-opacity=".85"/>`
+        ? `<path d="M${cx} 26 l7 14 h-14 z" fill="${PB.ink}" fill-opacity=".85"/>`
         : kind === "tension"
-        ? `<path d="M${cx} 30 l6 8 -6 8 -6 -8 z" fill="#ffffff" stroke="#052e16" stroke-width="2"/>`
-        : `<circle cx="${cx}" cy="${axisY - 10}" r="3.5" fill="#052e16" fill-opacity=".55"/>`;
+        ? `<path d="M${cx} 30 l6 8 -6 8 -6 -8 z" fill="${PB.card}" stroke="${PB.rust}" stroke-width="2"/>`
+        : `<circle cx="${cx}" cy="${axisY - 10}" r="3.5" fill="${PB.ink}" fill-opacity=".55"/>`;
       marks += `<a href="${BASE}/m/${esc(b.pid)}#t${Math.floor(mo.t)}" aria-label="${esc(tip.slice(0, 140))}">${glyph}<title>${esc(tip)}</title></a>`;
     });
     let ticks = "";
     for (let h = 0; h * 3600 <= dur; h++) {
       const cx = x(h * 3600);
-      ticks += `<line x1="${cx}" y1="${axisY}" x2="${cx}" y2="${axisY + 6}" stroke="#475569"/>`
-        + `<text x="${cx}" y="${axisY + 20}" text-anchor="${h === 0 ? "start" : "middle"}" font-size="10" fill="#475569">${h}h</text>`;
+      ticks += `<line x1="${cx}" y1="${axisY}" x2="${cx}" y2="${axisY + 6}" stroke="${PB.muted}"/>`
+        + `<text x="${cx}" y="${axisY + 20}" text-anchor="${h === 0 ? "start" : "middle"}" font-size="10" fill="${PB.muted}">${h}h</text>`;
     }
     const legend = Object.keys(SHAPE_KINDS).filter(k => counts[k])
       .map(k => nOf(counts[k], SHAPE_KINDS[k], SHAPE_KINDS[k] + "s")).join(" · ");
     const svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="group" `
       + `aria-label="the shape of ${esc(m.title || b.pid)} — ${mos.length} moments on a ${hms(dur)} tape; the table below reads them in order">`
-      + `<line x1="${padL}" y1="${axisY + 0.5}" x2="${W - padR}" y2="${axisY + 0.5}" stroke="#0f172a" stroke-width="1"/>`
+      + `<line x1="${padL}" y1="${axisY + 0.5}" x2="${W - padR}" y2="${axisY + 0.5}" stroke="${PB.ink}" stroke-width="1"/>`
       + ticks + marks + `</svg>`;
     const twin = `<thead><tr><th>time</th><th>kind</th><th>the moment</th></tr></thead><tbody>`
       + mos.map(mo => `<tr><td><a href="${BASE}/m/${esc(b.pid)}#t${Math.floor(mo.t)}">${hms(mo.t)}</a></td>
@@ -5327,7 +5936,7 @@
     return chartShell(kicker,
       `how this meeting framed what it discussed —
        ${fr.total || 0} signals, counted from its own words`,
-      lensBars(lenses.map(l => ({ name: l.lens, n: l.count || 0 }))),
+      lensBars(lenses.map(l => ({ name: l.lens, n: l.count || 0, meta: `${l.count || 0}${l.drift ? " · " + l.drift : ""}` }))),
       twin,
       `counted from the record’s read of
        <a href="${BASE}/m/${esc(b.pid)}">this meeting</a>`);
@@ -5412,21 +6021,137 @@
      grows any of this: it is read-only until specs/22's make-this-yours. */
   let ED_HASH_SEEN = false;   // #edit / #tpl are read once per page load
   let PAPER_HASH_WIRED = false;
-  const edHead = doc => `<header class="phead cz-edhead">
-      <input class="cz-edtitle" type="text" maxlength="${PAPER_TITLE_MAX}"
-        value="${esc(doc.title)}" placeholder="name your paper"
-        aria-label="your paper’s title">
-      <p class="ptitle cz-edtitle-print" aria-hidden="true">${esc(printTitle(doc.title))}</p>
-      <p class="pfrom">your draft, open for editing — drag a block by its
-        handle or use its ↑ ↓; ✕ removes it; ＋ adds one at that spot. It lives
-        in this browser; share it from the studio panel.</p>
-    </header>`;
+  let PAPER_TOWNS = [];       // the pressing's municipalities, for the scoped blocks' frames
+  let ED_ASKS = [];           // the open template's three questions
+  let ED_RAILED = false;      // the editor page railed the sidebar once (painted state)
+  let ED_SHARE_OPEN = false;  // the share row, once unfolded, stays through repaints
+  /* the editor page (board 8): the sidebar rails itself beside the board
+     the first time the editor paints on this page — painted state only;
+     › expands it, and the stored preference is untouched */
+  function bsEditorPage() {
+    if (ED_RAILED) return;
+    ED_RAILED = true;
+    if (window.matchMedia && window.matchMedia("(min-width: 1024px)").matches && !shownRail()) {
+      document.documentElement.classList.add("cz-rail"); pvPause(); updateModeButtons();
+    }
+  }
+  /* the head (board 8): the template line, the headline field — the title,
+     drafted by the template and yours to change — what is stored, and the
+     two acts: preview as readers see it, share as a link */
+  const edHead = (doc, opts) => { const T = TEMPLATES[doc.tpl] || null; opts = opts || {};
+    // the empty page IS the templates board — its head names no second one
+    const tplLine = opts.noBoard
+      ? `<span class="cz-edtpl">Template · <b>pick one below</b></span>`
+      : `<details class="cz-tplmore"><summary class="cz-edtpl">Template · <b>${esc(T ? T.name : doc.blocks.length ? "your own arrangement" : "Blank broadsheet")}</b> <span class="cz-edtpl-go">change</span></summary>
+          <div class="cz-tplboard-wrap">${tplBoard()}<div class="cz-tplpick" hidden></div></div></details>`;
+    return `<header class="phead cz-edhead">
+      <div class="cz-edtop">
+        ${tplLine}
+        <input class="cz-edtitle" type="text" maxlength="${PAPER_TITLE_MAX}"
+          value="${esc(doc.title)}" placeholder="name your front page"
+          aria-label="your front page’s headline — the template’s, yours to change">
+        <p class="ptitle cz-edtitle-print" aria-hidden="true">${esc(printTitle(doc.title))}</p>
+        <span class="cz-edstored">stored: the title, your notes, and references to the record — nothing else</span>
+        <span class="cz-edpill cz-edpill-head" aria-hidden="true">Headline · the template’s, yours to change</span>
+      </div>
+      <div class="cz-edacts-row">
+        <button type="button" class="btn" data-czed="preview">Preview as readers see it</button>
+        <button type="button" class="btn primary" data-czed="share">Share as a link</button>
+        <span class="cz-edshare"${PAPER_SHORT || ED_SHARE_OPEN ? "" : " hidden"}>
+          <button type="button" class="btn" data-czed="plink">⧉ copy the link again</button>
+          <button type="button" class="btn" data-czed="pjson">⬇ paper.json</button>
+          ${API ? `<button type="button" class="btn" data-czed="pshort">⚡ short link</button>` : ""}
+          <button type="button" class="btn" data-czed="pclear">clear</button>
+          ${PAPER_SHORT ? `<span class="cz-pshort-out">short link: <a href="${esc(PAPER_SHORT)}">${esc(PAPER_SHORT.replace(location.origin, ""))}</a></span>` : ""}
+        </span>
+        <p class="pfrom">your draft, open for editing — press a block on the shelf to add it, or drag it into the page;
+          a block’s ↑ ↓ move it, × removes it. It lives in this browser; a link carries it whole.</p>
+      </div>
+    </header>`; };
   /* an insertion point: the index a new block would land at */
   const edSlot = at => `<div class="cz-edslot" data-at="${at}">
       <button type="button" class="cz-edadd" data-czed="add" data-i="${at}"
         aria-expanded="false"
-        aria-label="add here${at ? ` — after block ${at}` : " — at the top"}">＋ add here</button>
+        aria-label="add a block here${at ? ` — after block ${at}` : " — at the top"}">+ add a block here</button>
     </div>`;
+  /* the block shelf (board 8): twelve blocks, each a press (adds at the
+     end) or a drag (adds where it lands). What each does when pressed: */
+  const SHELF = [
+    ["lead", "Lead story", "a meeting, its still, its moments"],
+    ["over", "Over time", "a thread’s timeline"],
+    ["week", "This week", "meetings as cards"],
+    ["threads", "Threads", "small multiples"],
+    ["strip", "How they talked", "the lens strip"],
+    ["names", "Who and where", "names and places"],
+    ["reel", "A reel", "moments, in order"],
+    ["quote", "A quote", "one caption, cited"],
+    ["rolls", "Roll calls", "votes as dots"],
+    ["numbers", "In numbers", "the counts"],
+    ["note", "Your paragraph", "what it means"],
+    ["search", "Search box", "readers search your page"],
+  ];
+  const edShelf = () => `<aside class="cz-blocks" aria-label="blocks — press one to add it at the end, or drag it into the page">
+      <span class="cz-tag">blocks · drag into the page</span>
+      ${SHELF.map(([k, name, sub]) => `<button type="button" class="cz-blk" draggable="true" data-czed="blk" data-blk="${k}"
+        aria-label="${esc(name)} — ${esc(sub)}"><span class="cz-blk-grip" aria-hidden="true">⠿</span><span class="cz-blk-t"><b>${esc(name)}</b><span>${esc(sub)}</span></span></button>`).join("")}
+    </aside>`;
+  /* a shelf press or drop: the blocks that need a pick (a meeting, a
+     thread, a line, a count) open the inline add at that slot, narrowed to
+     the pick; the rest join at once */
+  function shelfAdd(kind, at) {
+    const el = $("#paperbody"); if (!el) return;
+    const n = readPaper().blocks.length;
+    const where = at == null ? n : Math.max(0, Math.min(n, at | 0));
+    const slot = $(`.cz-edslot[data-at="${where}"]`, el);
+    if (kind === "lead" || kind === "over" || kind === "quote" || kind === "numbers") { if (slot) openEdAdd(slot, { pick: kind }); return; }
+    if (kind === "reel") return addReelToPaper(where);
+    if (kind === "rolls") return addChartToPaper("votes", "", where);
+    if (kind === "note") return addNoteToPaper(where);
+    if (BS_SCOPED.includes(kind) || kind === "search") return addBsBlock(kind, where);
+  }
+  /* the frame's pill (board 8): what the block is, in the board's words */
+  const bsTownName = slug => PAPER_TOWNS.find(t => bsSlug(t) === slug) || slug;
+  const bsWhoName = who => String(who || "").replace(/^[plo]-/, "").split("-").filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+  function pillLabel(b) {
+    const who = s => cut(String(s || ""), 48);
+    const mt = pid => ((PAPER_PLANES.mby || {})[pid] || {}).title || "";
+    const it = slug => ((PAPER_PLANES.iby || {})[slug] || {}).name || "";
+    if (b.kind === "lead" && !b.title && mt(b.pid)) b = { ...b, title: mt(b.pid) };
+    if (b.kind === "story" && b.story === "meeting" && !b.title && mt(b.pid)) b = { ...b, title: mt(b.pid) };
+    if (b.kind === "story" && b.story === "issue" && !b.name && it(b.slug)) b = { ...b, name: it(b.slug) };
+    if (b.kind === "chart" && !b.name && b.slug && it(b.slug)) b = { ...b, name: it(b.slug) };
+    if (b.kind === "chart" && !b.title && b.pid && mt(b.pid)) b = { ...b, title: mt(b.pid) };
+    if (b.kind === "reading" && !b.title && !b.name) b = { ...b, title: b.pid ? mt(b.pid) : it(b.slug) };
+    if (BS_SCOPED.includes(b.kind) && !b.name) b = { ...b, name: b.who ? bsWhoName(b.who) : b.town ? bsTownName(b.town) : "" };
+    return b.kind === "lead" ? `Lead story · ${who(b.title || b.pid)}`
+      : b.kind === "story" && b.story === "meeting" ? `A meeting · ${who(b.title || b.pid)}`
+      : b.kind === "story" && b.story === "issue" ? `An issue · ${who(b.name || b.slug)}`
+      : b.kind === "chart" && b.chart === "reach" ? `Over time · ${who(b.name || b.slug)}`
+      : b.kind === "chart" && b.chart === "votes" ? (b.pid ? `Roll calls · ${who(b.title || b.pid)}` : "Roll calls · votes as dots")
+      : b.kind === "chart" && b.chart === "numbers" ? `In numbers · ${who(b.title || b.name || b.pid || b.slug)}`
+      : b.kind === "chart" && b.chart === "shape" ? `The shape of the tape · ${who(b.title || b.pid)}`
+      : b.kind === "chart" && b.chart === "framing" ? (b.pid ? `How it was framed · ${who(b.title || b.pid)}` : "How the record talks · the framing")
+      : b.kind === "chart" && b.chart === "ledger" ? `Every roll call · ${who(b.name || b.slug)}`
+      : b.kind === "chart" ? "Recurring topics · the counts"
+      : b.kind === "reel" ? `A reel · ${nOf(b.clips.length, "clip", "clips")}, cited`
+      : b.kind === "note" ? "Your paragraph · what it means"
+      : b.kind === "quote" ? `A quote · ${hms(b.t)}${b.title ? " · " + who(b.title) : ""}`
+      : b.kind === "doc" ? `A filing · ${who(b.title || b.doc)}`
+      : b.kind === "digest" ? `What changed · ${who(b.name || b.slug)}`
+      : b.kind === "reading" ? `The record’s reading · ${who(b.title || b.name || b.pid || b.slug)}`
+      : b.kind === "week" ? `This week${b.name ? " · " + who(b.name) : b.town ? " · " + b.town : ""}`
+      : b.kind === "threads" ? `Threads${b.name ? " · " + who(b.name) : b.town ? " · " + b.town : ""}`
+      : b.kind === "strip" ? `How they talked${b.name ? " · " + who(b.name) : b.town ? " · " + b.town : ""}`
+      : b.kind === "names" ? (b.who ? `On the record · ${who(b.name || b.who)}` : `Who and where${b.name ? " · " + who(b.name) : b.town ? " · " + b.town : ""}`)
+      : b.kind === "search" ? "Search box · readers search your page"
+      : blockLabel(b).replace(/^\S+ /, "");
+  }
+  /* a scoped block's municipality select — the pressing's towns, or every town */
+  const edTownSelect = (b, i) => BS_SCOPED.includes(b.kind) && !b.who && PAPER_TOWNS.length
+    ? `<select class="cz-edtown" data-i="${i}" aria-label="which town block ${i + 1} reads" title="which town this block reads">
+        <option value=""${b.town ? "" : " selected"}>every town</option>
+        ${PAPER_TOWNS.map(t => `<option value="${esc(bsSlug(t))}"${b.town === bsSlug(t) ? " selected" : ""}>${esc(t)}</option>`).join("")}
+      </select>` : "";
   /* the print twins: an <input> prints one clipped line and a <textarea>
      its four rows, not their words — the paper prints these instead, kept
      in step with every keystroke and re-read on beforeprint */
@@ -5440,14 +6165,16 @@
   const DESK_PROMPTS = ["what was decided, and who moved it?",
                         "what changed since the last time?",
                         "what should a neighbor watch for next?"];
-  const edNote = (b, i) => `<div class="pb-note cz-ednotewrap">
-      <span class="kicker">the editor’s note</span>
-      <textarea class="cz-ednote" data-i="${i}" rows="4" maxlength="${PAPER_NOTE_MAX}"
-        placeholder="${esc(DESK_PROMPTS[i % DESK_PROMPTS.length])} — your own words"
-        aria-label="note ${i + 1} — your own words">${esc(b.text)}</textarea>
+  /* the paragraph's field (board 8): the template's questions rotate in its
+     placeholder — the facts and the questions live on the desk beside it */
+  const edNote = (b, i) => { const asks = ED_ASKS.length ? ED_ASKS : DESK_PROMPTS;
+    return `<div class="pb-note cz-ednotewrap">
+      <span class="kicker">what it means — the writer</span>
+      <textarea class="cz-ednote" data-i="${i}" rows="5" maxlength="${PAPER_NOTE_MAX}"
+        placeholder="${esc(asks[i % asks.length])} — your own words; a [1:46:50] in brackets is a receipt"
+        aria-label="paragraph ${i + 1} — your own words">${esc(b.text)}</textarea>
       <div class="cz-ednote-print" aria-hidden="true">${notePrint(b.text)}</div>
-      <details class="cz-desk"><summary>facts at hand — receipts to cite</summary>
-        <div class="cz-deskbody"></div></details></div>`;
+      <div class="cz-ednote-foot"><span>every bracket is a receipt — cite a fact from the desk</span><span>yours · not a model’s</span></div></div>`; };
   let PAPER_PLANES = { mby: {}, iby: {} };   // the last render's planes; the desk reads them
   function deskFacts() {
     const facts = [], { mby, iby } = PAPER_PLANES;
@@ -5455,10 +6182,11 @@
     for (const pid of Object.keys(mby || {})) {
       const m = mby[pid]; if (!m) continue;
       const an = m.analysis || {}, who = m.title || pid, when = m.date ? `, ${m.date}` : "";
+      // the lists are capped at press time — a length at the cap reads "20+"
       facts.push({ kind: "the numbers", text: `${who}${m.date ? ` (${m.date})` : ""}: `
-        + `${Math.round((+m.duration || 0) / 60)} minutes · ${(m.votes || []).length} roll calls · `
-        + `${(an.decisions || []).length} decisions · ${(an.questions || []).length} questions asked · `
-        + `${(an.tension || []).length} moments of pushback` });
+        + `${nOf(Math.round((+m.duration || 0) / 60), "minute", "minutes")} · ${nOf((m.votes || []).length, "roll call", "roll calls")} · `
+        + `${bsCapN(an.decisions, BS_CAPS.decisions)} decisions · ${bsCapN(an.questions, BS_CAPS.questions)} questions asked · `
+        + `${bsCapN(an.tension, BS_CAPS.tension)} moments of pushback` });
       for (const mo of (m.moments || []).filter(mo => mo && typeof mo.t === "number")
           .slice().sort((a, c) => (+c.score || 0) - (+a.score || 0)).slice(0, 4))
         facts.push({ kind: SHAPE_KINDS[mo.kind] || mo.kind || "moment",
@@ -5479,18 +6207,72 @@
     }
     return facts.slice(0, 24);
   }
-  function fillDesk(d) {
-    const body = $(".cz-deskbody", d); if (!body || body.dataset.filled) return;
+  /* the writing desk (board 8): three cards — the facts you can cite, a
+     draft if you want one (the record's own drafted reading of the lead
+     meeting, labeled with the model that wrote it; never silently yours),
+     and the template's three questions — and the covenant line */
+  const bsDraftOf = m => { const d = m && (m.analysis || {}).draft;
+    return d && typeof d === "object" && typeof d.text === "string" && d.text.trim() && /^ai:/.test(String(d.origin || "")) ? d : null; };
+  function deskLead(doc, mby) {
+    // every meeting the page cites, in the order it cites them (a reel's
+    // clips included): the first with a drafted reading is offered; failing
+    // that the first meeting, so the card can say "none" honestly
+    const seen = [];
+    for (const b of doc.blocks) for (const pid of (b.kind === "reel" ? b.clips.map(c => c.pid) : b.pid ? [b.pid] : []))
+      if (mby[pid] && !seen.includes(pid)) seen.push(pid);
+    const pid = seen.find(x => bsDraftOf(mby[x])) || seen[0];
+    return pid ? { pid, m: mby[pid], cited: seen.length } : null;
+  }
+  function edDesk(doc, mby) {
+    const asks = ED_ASKS.length ? ED_ASKS : DESK_PROMPTS;
     const facts = deskFacts();
-    body.dataset.filled = "1";
-    body.innerHTML = facts.length
-      ? `<p class="cz-hint">press a fact to cite it at the caret — the words stay the record’s, the sentence around them yours</p>`
-        + facts.map(f => `<button type="button" class="cz-fact" data-czfact="${esc(f.text)}"><span class="rt-kind">${esc(f.kind)}</span> ${esc(cut(f.text, 150))}</button>`).join("")
-      : `<p class="cz-hint">add a meeting or an issue to your paper and its facts land here</p>`;
+    const lead = deskLead(doc, mby);
+    const d = lead ? bsDraftOf(lead.m) : null;
+    const has = !!(lead && doc.blocks.some(b => b.kind === "reading" && b.pid === lead.pid));
+    const night = lead ? [lead.m.title || lead.pid, TP_DAY.test(lead.m.date || "") ? tpDay(lead.m.date) : ""].filter(Boolean).join(" · ") : "";
+    return `<aside class="cz-desk" aria-label="the writing desk">
+      <span class="cz-tag">the writing desk</span>
+      <section class="cz-deskcard cz-deskfacts">
+        <span class="cz-desklabel">facts you can cite · click to insert</span>
+        ${facts.length
+          ? facts.map(f => `<button type="button" class="cz-fact" data-czfact="${esc(f.text)}"><span class="rt-kind">${esc(f.kind)}</span> ${esc(cut(f.text, 150))}</button>`).join("")
+          : `<p class="cz-hint">add a meeting or an issue to your page and its facts land here — the numbers, the loudest moments, the roll calls</p>`}
+      </section>
+      <section class="cz-deskcard cz-deskdraft">
+        <div class="cz-deskhead"><span class="cz-desklabel">a draft, if you want one</span>${d ? `<span class="cz-modelpill">${esc(String(d.origin).replace(/^ai:/, ""))}</span>` : ""}</div>
+        <p class="cz-hint">${d
+          ? `Paragraphs a model drafted from the same receipts when the record read <b>${esc(night)}</b> — labeled, never silently yours. Add them as the record’s reading, cut them, or ignore them.`
+          : lead ? `The record drafted no paragraphs for ${lead.cited === 1 ? "this page’s meeting" : `any of the ${nOf(lead.cited, "meeting", "meetings")} this page cites`}. The facts above are the receipts; the paragraphs are yours.`
+          : "Add a meeting and the record’s drafted reading of it, if it has one, is offered here — labeled, never silently yours."}</p>
+        ${d ? `<div class="cz-deskacts">
+          <button type="button" class="btn primary" data-czed="draft" data-ref="m:${esc(lead.pid)}"${has ? " disabled" : ""}>${has ? "the drafted reading is on your page" : `Add the drafted reading of ${esc(cut(lead.m.body || lead.m.title || lead.pid, 40))}`}</button>
+          <button type="button" class="btn" data-czed="receipts" data-ref="${esc(lead.pid)}" aria-expanded="false">Show the receipts</button></div>
+          <div class="cz-deskreceipts" hidden>${receiptParas(d.text, `${BASE}/m/${esc(lead.pid)}`)}<p class="cz-hint">drafted by ${esc(String(d.origin).replace(/^ai:/, ""))} — every bracket opens the tape; check it against the record before you keep a word</p></div>` : ""}
+      </section>
+      <section class="cz-deskcard cz-deskasks">
+        <span class="cz-desklabel">the template asks</span>
+        ${asks.map((q, i) => `<button type="button" class="cz-ask" data-czask="${i}"><span class="cz-ask-n">${i + 1}.</span><span>${esc(q)}</span></button>`).join("")}
+      </section>
+      <p class="cz-deskcov">No account. Nothing uploaded but the title, your notes and the references. Readers who open your link get the record’s bytes and your words; nobody is counted.</p>
+    </aside>`;
+  }
+  let DESK_NOTE = -1;   // the paragraph the caret was last in — the desk cites into it
+  /* a question pressed on the desk: the caret goes to a paragraph — the
+     first empty one, else the last — and the question becomes its prompt */
+  function focusAsk(i) {
+    const el = $("#paperbody"); if (!el) return;
+    const tas = $$(".cz-ednote", el);
+    if (!tas.length) { if (addNoteToPaper(readPaper().blocks.length) >= 0) toast("a paragraph added — press the question again to make it the prompt"); return; }
+    const ta = tas.find(t => !t.value.trim()) || tas[tas.length - 1];
+    const asks = ED_ASKS.length ? ED_ASKS : DESK_PROMPTS;
+    if (asks[i]) ta.placeholder = `${asks[i]} — your own words`;
+    ta.focus(); ta.scrollIntoView({ block: "center" });
   }
   function citeFact(btn) {
-    const wrap = btn.closest(".cz-ednotewrap"), ta = wrap && $(".cz-ednote", wrap);
-    if (!ta) return;
+    const el = $("#paperbody"); if (!el) return;
+    const tas = $$(".cz-ednote", el);
+    const ta = tas.find(t => +t.dataset.i === DESK_NOTE) || tas.find(t => !t.value.trim()) || tas[tas.length - 1];
+    if (!ta) { if (addNoteToPaper(readPaper().blocks.length) >= 0) toast("a paragraph added — press the fact again to cite it there"); return; }
     const text = btn.dataset.czfact || "", s = ta.selectionStart, e = ta.selectionEnd;
     const before = ta.value.slice(0, s), after = ta.value.slice(e);
     const ins = (before && !/\s$/.test(before) ? " " : "") + text + (after && !/^\s/.test(after) ? " " : "");
@@ -5499,6 +6281,8 @@
     ta.focus(); ta.setSelectionRange(at, at);
     ta.dispatchEvent(new Event("input", { bubbles: true }));   // the save path hears it
   }
+  /* a block's frame (board 8): the rust dashed frame, its pill riding the
+     top edge, the handle, the layout, a town for the scoped blocks, ↑ ↓ × */
   function edRow(html, b, i, n, pair) {
     const act = (a, glyph, label, dis) =>
       `<button type="button" class="cz-edact" data-czed="${a}" data-i="${i}"
@@ -5508,12 +6292,13 @@
         <button type="button" class="cz-edhandle" data-i="${i}"
           aria-label="block ${i + 1} of ${n} — drag to move, or press ↑ ↓"
           title="drag to move — or press ↑ ↓">⠿</button>
-        <span class="cz-edkind">${esc(blockLabel(b))}</span>
+        <span class="cz-edkind cz-edpill" title="${esc(blockLabel(b))}">${esc(pillLabel(b))}</span>
         <select class="cz-edlayout" data-i="${i}" aria-label="layout of block ${i + 1}" title="how this block sits on the page">
           <option value=""${b.layout ? "" : " selected"}>as it comes</option>
           ${PAPER_LAYOUTS.map(l => `<option value="${l}"${b.layout === l ? " selected" : ""}>${LAYOUT_LABEL[l]}</option>`).join("")}
         </select>
-        <span class="cz-edacts">${act("up", "↑", `move block ${i + 1} up`, !i)}${act("down", "↓", `move block ${i + 1} down`, i >= n - 1)}${act("del", "✕", `remove block ${i + 1}`)}</span>
+        ${edTownSelect(b, i)}
+        <span class="cz-edacts">${act("up", "↑", `move block ${i + 1} up`, !i)}${act("down", "↓", `move block ${i + 1} down`, i >= n - 1)}${act("del", "×", `remove block ${i + 1}`)}</span>
       </div>
       <div class="cz-edbody">${b.kind === "note" ? edNote(b, i) : html}</div>
     </div>`;
@@ -5529,7 +6314,7 @@
     const keep = captureEdFocus(el);
     if (!$(".cz-edteach", el)) {
       el.classList.add("cz-editing");
-      el.innerHTML = edHead(doc) + `<p class="hint cz-edwait">opening the editor…</p>`;
+      el.innerHTML = edHead(doc, { noBoard: true }) + `<p class="hint cz-edwait">opening the editor…</p>`;
       restoreEdFocus(el, keep);
     }
     const st = await getJSON(`${BASE}/stats.json`) || {};
@@ -5545,25 +6330,125 @@
       `<button type="button" class="cz-edstart" data-czed="tpl" data-tpl="${t}"${ref ? ` data-ref="${esc(ref)}"` : ""}>
         <b>${esc(label)}</b><span>${esc(sub)}</span></button>`;
     el.classList.add("cz-editing");
-    el.innerHTML = edHead(doc) + `<section class="cz-edteach">
-        <div class="sectionhead"><span class="kicker">your paper starts empty — three ways in</span></div>
+    ED_ASKS = [];
+    // the templates board (board 7): eight cards, each what it draws and
+    // what it asks; a Start opens the picker for what it is about. Under
+    // them, the record's own two quickest starts — tonight's tape and the
+    // widest thread — and the first insertion point for a blank page.
+    el.innerHTML = edHead(doc, { noBoard: true }) + `<section class="cz-edteach cz-tplboard" aria-labelledby="cz-tpl-h">
+        <h3 class="cz-tpl-h" id="cz-tpl-h">Start from a template</h3>
+        <p class="cz-tpl-lede">Every template draws its own pictures from the record and, where the record holds one, offers its labeled reading to keep or cut. Each asks you three questions; your answers are the paper. Pick one, then pick the meeting, thread, question, person, place or towns it is about.</p>
+        ${tplBoard()}
+        <div class="cz-tplpick" hidden></div>
         <div class="cz-edstarts">
-          ${start("rolls", "", "the roll calls, watched",
-                  "every roll call on the record, dot by dot — and how the talk around them was framed")}
-          ${lead && PAPER_REF.test(lead.pid || "") ? start("meeting", lead.pid, "the latest meeting, covered",
-                  `${lead.title || lead.pid} — as a story, with its framing and what keeps coming back`) : ""}
-          ${loud && PAPER_REF.test(loud.slug || "") ? start("issue", loud.slug, `${cut(loud.name || loud.slug, 60)}, watched`,
-                  `one issue across ${loud.n_meetings || 0} meeting${loud.n_meetings === 1 ? "" : "s"}, and its reach over time`) : ""}
+          ${lead && PAPER_REF.test(lead.pid || "") ? start("meeting", lead.pid, "tonight’s tape, covered",
+                  `${lead.title || lead.pid} — the lead story, its numbers, its shape, its framing, the record’s reading`) : ""}
+          ${loud && PAPER_REF.test(loud.slug || "") ? start("issue", loud.slug, `${cut(loud.name || loud.slug, 60)}, over time`,
+                  `the record’s widest thread — ${loud.n_meetings || 0} meeting${loud.n_meetings === 1 ? "" : "s"}, its timeline, a reel, its framing`) : ""}
+          ${start("rolls", "", "the roll calls, watched", "every roll call on the record, dot by dot — and how the talk around them was framed")}
           <a class="cz-edstart" href="${BASE}/"><b>browse the record →</b>
-            <span>every meeting and issue card carries “＋ your paper” now — read, and press it when a story is yours</span></a>
+            <span>every meeting and issue card carries “＋ your paper” — read, and press it when a story is yours</span></a>
         </div>
-        <p class="cz-hint">A shape is a draft, not a decision — every block can be moved or removed, and the note is yours to write. Or add the first block right here:</p>
+        <p class="cz-hint">a template is a list of blocks and three questions — the record fills the blocks, you answer the questions · your page stores its title, your notes and references, nothing else. Or add the first block right here:</p>
         ${edSlot(0)}
       </section>`;
     wireEditor(el);
+    bsEditorPage();
     // a second pass (the storage event, the panel typing) must put the
     // caret back where it was — the block path's rule, kept here too
     restoreEdFocus(el, PAGE_FOCUS || keep2); PAGE_FOCUS = null;
+  }
+  /* the templates board's cards (board 7) — pure over TEMPLATES */
+  const tplBoard = () => `<div class="cz-tplgrid">${TEMPLATE_ORDER.map(t => { const T = TEMPLATES[t];
+    return `<button type="button" class="cz-tplcard" data-czed="tplstart" data-tpl="${t}">
+      <b>${esc(T.name)}</b><span class="cz-tpl-draws">${esc(T.draws)}</span>
+      <span class="cz-tpl-asks">asks · ${T.asks.length ? T.asks.map(esc).join(" · ") : "—"}</span>
+      <span class="cz-tpl-go">Start →</span></button>`; }).join("")}</div>`;
+  const PICK_WORDS = { meeting: ["which meeting?", "a body, a month, a title…"], issue: ["which thread?", "an issue’s name…"],
+    people: ["which person?", "a name the record keeps hearing…"], places: ["which place?", "a street, a square, a park…"],
+    towns: ["which two towns?", ""] };
+  /* a Start (board 7): a template about something opens the picker; the
+     year and the roll calls write at once; the blank page opens its first
+     insertion point */
+  function tplStart(t, el, card) {
+    const T = TEMPLATES[t]; if (!T) return;
+    if (t === "blank") { const slot = $('.cz-edslot[data-at="0"]', el) || $(".cz-edslot", el); if (slot) openEdAdd(slot); return; }
+    if (!T.pick) { applyPaperTemplate(t, null, "page"); return; }
+    // the picker of THIS board (the head's, or the empty page's) — a shared
+    // id painted the wrong one, inside a closed details (a pane catch)
+    const wrap = card && card.closest(".cz-tplboard-wrap, .cz-tplboard");
+    tplPicker(t, wrap && $(".cz-tplpick", wrap), card);
+  }
+  /* the picker's close: the box empties and the keyboard goes back to the
+     card that opened it — never to <body> (a review catch) */
+  function tplClose(box) {
+    if (!box) return;
+    const back = box._origin; box.hidden = true; box.innerHTML = "";
+    if (back && back.isConnected && typeof back.focus === "function") back.focus();
+  }
+  async function tplPicker(t, box, card) {
+    const T = TEMPLATES[t]; if (!box || !T) return;
+    box._origin = card || null;
+    const [ask, ph] = PICK_WORDS[T.pick] || ["which?", ""];
+    box.hidden = false;
+    box.innerHTML = `<div class="cz-tplpick-in" role="group" aria-label="${esc(T.name)} — ${esc(ask)}">
+      <div class="cz-deskhead"><span class="cz-tag">${esc(T.name)} — ${esc(ask)}</span><button type="button" class="btn cz-tplclose" data-czed="tplclose">close</button></div>
+      ${T.pick === "towns" ? "" : `<input class="cz-tplq" type="search" autocomplete="off" placeholder="${esc(ph)}" aria-label="${esc(ask)}">`}
+      <p class="cz-edcount" role="status"></p>
+      <div class="cz-tplhits"></div></div>`;
+    const q = $(".cz-tplq", box);
+    // every keystroke — and every Start on this box — is a generation; only
+    // the newest paints (the counter lives on the box, not the call)
+    const paint = async () => {
+      const my = box._gen = (box._gen || 0) + 1;
+      const terms = lexTerms(q ? q.value : "");
+      let items = [];
+      if (T.pick === "meeting" || T.pick === "issue") {
+        const idx = await edIndex();
+        items = lexRank(terms, T.pick === "meeting" ? idx.meetings : idx.issues).slice(0, 8)
+          .map(h => ({ ref: h.ref, title: h.title, meta: h.meta }));
+      } else if (T.pick === "people" || T.pick === "places") {
+        const an = await getJSON(`${BASE}/analytics.json`);
+        const names = (an && Array.isArray(an.names) ? an.names : []).filter(n => n && typeof n.name === "string" && n.kind === T.pick)
+          .map(n => ({ ref: String(n.slug || bsWho(n.kind, n.name)), title: n.name, text: n.name, sort: (n.meetings || []).length,
+                       meta: `${nOf((n.meetings || []).length, "meeting", "meetings")} · ${Math.floor(+n.count || 0)}×` }));
+        items = lexRank(terms, names).slice(0, 10);
+      } else if (T.pick === "towns") {
+        const ed = await edition();
+        const ts = (ed.towns || []).map(x => String((x && x.town) || "")).filter(Boolean);
+        for (let i = 0; i < ts.length; i++) for (let j = i + 1; j < ts.length; j++)
+          items.push({ ref: `${ts[i]}|${ts[j]}`, title: `${ts[i]} and ${ts[j]}`, meta: "side by side" });
+      }
+      const hits = $(".cz-tplhits", box), count = $(".cz-edcount", box);
+      if (!hits || my !== box._gen) return;
+      const none = T.pick === "towns" ? "this pressing holds one town — two towns side by side needs two" : terms.length ? "nothing on the record matches" : "the record holds nothing to pick yet";
+      hits.innerHTML = items.length
+        ? items.map(it => `<button type="button" class="cz-tplhit" data-czed="tplgo" data-tpl="${t}" data-ref="${esc(it.ref)}" data-name="${esc(it.title)}">
+            <b>${esc(it.title)}</b><span>${esc(it.meta)}</span><span class="cz-tplgo">Start →</span></button>`).join("")
+        : "";
+      // the status line speaks either way — a count, or why there is none
+      if (count) count.textContent = items.length ? `${items.length} to pick from` : none;
+    };
+    if (q) { q.addEventListener("input", () => { clearTimeout(q._deb); q._deb = setTimeout(paint, 180); }); q.focus(); }
+    await paint();
+    if (!q) { const first = $(".cz-tplhit", box); if (first) first.focus(); }
+  }
+  function tplGo(t, ref, name) {
+    const T = TEMPLATES[t]; if (!T) return;
+    const r = T.pick === "meeting" ? { story: "meeting", pid: ref }
+      : T.pick === "issue" ? { story: "issue", slug: ref }
+      : T.pick === "people" || T.pick === "places" ? { who: ref, name }
+      : T.pick === "towns" ? { a: ref.split("|")[0], b: ref.split("|")[1] } : null;
+    applyPaperTemplate(t, r, "page");
+  }
+  /* share as a link (board 8): the link goes to the clipboard and the other
+     outputs unfold — paper.json, the short link, clear */
+  function edShare(el) {
+    const p = readPaper();
+    if (!paperHasLive(p)) { toast("add a block or a headline first — an empty page has nothing to share"); return; }
+    copyText(paperShareURL(p), "link copied — it carries the whole front page");
+    ED_SHARE_OPEN = true;
+    const row = $(".cz-edshare", el); if (row) row.hidden = false;
   }
   /* focus survives a repaint: what the reader was on, put back after the
      innerHTML swap — the panel's rule (refreshPaperSummary), on the page */
@@ -5574,12 +6459,15 @@
     if (ae.classList.contains("cz-ednote")) return { act: "note", i: +ae.dataset.i, caret: ae.selectionStart };
     if (ae.classList.contains("cz-edhandle")) return { act: "handle", i: +ae.dataset.i };
     if (ae.classList.contains("cz-edlayout")) return { act: "layout", i: +ae.dataset.i };
+    if (ae.classList.contains("cz-edtown")) return { act: "town", i: +ae.dataset.i };
+    if (ae.classList.contains("cz-blk")) return { act: "blk", blk: ae.dataset.blk };
+    if (ae.classList.contains("cz-tplq")) return { act: "tplq", caret: ae.selectionStart };
     if (ae.classList.contains("pb-pv")) return { act: "pbpv", key: ae.dataset.pvkey };
     // an open inline add survives the repaint with its query and its caret:
     // the field itself, or one of its hit buttons (focus returns to the field)
     const slot = ae.closest(".cz-edslot");
     const q = slot && $(".cz-edq", slot);
-    if (q) return { act: "q", at: +slot.dataset.at, v: q.value,
+    if (q) return { act: "q", at: +slot.dataset.at, v: q.value, pick: slot.dataset.pick || "",
                     caret: ae === q ? q.selectionStart : null };
     if (ae.dataset && ae.dataset.czed) return { act: ae.dataset.czed, i: +ae.dataset.i };
     return null;
@@ -5588,20 +6476,24 @@
      as an open panel with its query, focus left where it was */
   function captureEdPanel(el) {
     const q = $(".cz-edpanel .cz-edq", el); if (!q) return null;
-    return { act: "qkeep", at: +q.closest(".cz-edslot").dataset.at, v: q.value };
+    const slot = q.closest(".cz-edslot");
+    return { act: "qkeep", at: +slot.dataset.at, v: q.value, pick: slot.dataset.pick || "" };
   }
   function restoreEdFocus(el, f) {
     if (!f) return;
     if (f.act === "q" || f.act === "qkeep") {
       const slot = $(`.cz-edslot[data-at="${f.at}"]`, el);
       if (!slot) return;
-      openEdAdd(slot, { value: f.v, focus: f.act === "q", caret: f.caret });
+      openEdAdd(slot, { value: f.v, focus: f.act === "q", caret: f.caret, pick: f.pick });
       return;
     }
     let t = f.act === "title" ? $(".cz-edtitle", el)
       : f.act === "note" ? $(`.cz-ednote[data-i="${f.i}"]`, el)
       : f.act === "handle" ? $(`.cz-edhandle[data-i="${f.i}"]`, el)
       : f.act === "layout" ? $(`.cz-edlayout[data-i="${f.i}"]`, el)
+      : f.act === "town" ? $(`.cz-edtown[data-i="${f.i}"]`, el)
+      : f.act === "blk" ? $(`.cz-blk[data-blk="${f.blk}"]`, el)
+      : f.act === "tplq" ? $(".cz-tplq", el)
       : f.act === "pbpv" ? $$(".pb-pv", el).find(b => b.dataset.pvkey === f.key)
       : f.act === "add" ? $(`.cz-edadd[data-i="${f.i}"]`, el)
       : $(`[data-czed="${f.act}"][data-i="${f.i}"]`, el);
@@ -5628,15 +6520,15 @@
       const ti = $(".cz-edtitle", el), tw = $(".cz-edtitle-print", el);
       if (ti && tw) tw.textContent = printTitle(cut(ti.value, PAPER_TITLE_MAX));
     });
-    // the writing desk fills on first open, from the planes the last render
-    // fetched; a press on a fact cites it at the note's caret
-    el.addEventListener("toggle", e => {
-      const d = e.target;
-      if (d && d.classList && d.classList.contains("cz-desk") && d.open) fillDesk(d);
-    }, true);
+    // the desk cites into the paragraph the caret was last in
+    el.addEventListener("focusin", e => {
+      const t = e.target; if (t && t.classList && t.classList.contains("cz-ednote")) DESK_NOTE = +t.dataset.i;
+    });
     el.addEventListener("click", e => {
       const f = e.target.closest && e.target.closest("[data-czfact]");
       if (f && el.contains(f)) { citeFact(f); return; }
+      const ask = e.target.closest && e.target.closest("[data-czask]");
+      if (ask && el.contains(ask)) { focusAsk(+ask.dataset.czask); return; }
       const b = e.target.closest && e.target.closest("[data-czed]");
       if (!b || !el.contains(b)) return;
       const act = b.dataset.czed, i = +b.dataset.i;
@@ -5644,6 +6536,21 @@
       else if (act === "del") movePaperBlock(i, "pdel", "page");
       else if (act === "add") openEdAdd(b.closest(".cz-edslot"));
       else if (act === "close") closeEdAdd(b.closest(".cz-edslot"));
+      // the board (specs/29): the shelf, the head's two acts and the share
+      // row, the templates board and its picker, the desk's draft
+      else if (act === "blk") shelfAdd(b.dataset.blk);
+      else if (act === "preview") setMode("preview");
+      else if (act === "share") edShare(el);
+      else if (act === "plink") copyText(paperShareURL(readPaper()), "link copied — it carries the whole front page");
+      else if (act === "pjson") downloadPaper(readPaper());
+      else if (act === "pshort") paperShortLink().then(() => { if (PAPER_SHORT) renderPaperNow(); });
+      else if (act === "pclear") clearPaper();
+      else if (act === "tplstart") tplStart(b.dataset.tpl, el, b);
+      else if (act === "tplgo") tplGo(b.dataset.tpl, b.dataset.ref || "", b.dataset.name || "");
+      else if (act === "tplclose") tplClose(b.closest(".cz-tplpick"));
+      else if (act === "draft") addReadingToPaper(b.dataset.ref || "");
+      else if (act === "receipts") { const r = b.closest(".cz-deskcard") && $(".cz-deskreceipts", b.closest(".cz-deskcard"));
+        if (r) { r.hidden = !r.hidden; b.setAttribute("aria-expanded", r.hidden ? "false" : "true"); b.textContent = r.hidden ? "Show the receipts" : "Hide the receipts"; } }
       else if (act === "tpl") {
         const t = b.dataset.tpl, r = b.dataset.ref || "";
         applyPaperTemplate(t, t === "meeting" ? { story: "meeting", pid: r }
@@ -5652,6 +6559,9 @@
         const slot = b.closest(".cz-edslot"); if (!slot) return;
         const at = +slot.dataset.at, kind = b.dataset.kind, ref = b.dataset.ref || "";
         if (kind === "m") addStoryRef({ story: "meeting", pid: ref }, at);
+        else if (kind === "lead") addLeadRef(ref, at);
+        else if (kind === "bs") addBsBlock(ref, at);
+        else if (kind === "pick") openEdAdd(slot, { pick: ref });
         else if (kind === "i") addStoryRef({ story: "issue", slug: ref }, at);
         else if (kind === "cm") addChartToPaper("framing", ref, at);
         else if (kind === "ci") addChartToPaper("reach", ref, at);
@@ -5677,7 +6587,9 @@
         movePaperBlock(+h.dataset.i, e.key === "ArrowUp" ? "pup" : "pdown", "page");
       } else if (e.key === "Escape") {
         const slot = e.target.closest && e.target.closest(".cz-edslot");
-        if (slot && $(".cz-edpanel", slot)) { e.preventDefault(); closeEdAdd(slot); }
+        if (slot && $(".cz-edpanel", slot)) { e.preventDefault(); closeEdAdd(slot); return; }
+        const pick = e.target.closest && e.target.closest(".cz-tplpick");
+        if (pick && !pick.hidden) { e.preventDefault(); tplClose(pick); }
       }
     });
     // typing on the page saves on every keystroke and repaints the PANEL
@@ -5707,8 +6619,9 @@
     // the layout select (C1): a change writes the enum and repaints both
     // surfaces; focus returns to the same select on the same block
     el.addEventListener("change", e => {
-      const t = e.target; if (!t || !t.classList || !t.classList.contains("cz-edlayout")) return;
-      setBlockLayout(+t.dataset.i, t.value);
+      const t = e.target; if (!t || !t.classList) return;
+      if (t.classList.contains("cz-edlayout")) setBlockLayout(+t.dataset.i, t.value);
+      else if (t.classList.contains("cz-edtown")) setBlockTown(+t.dataset.i, t.value);
     });
     wireEditorDnD(el);
   }
@@ -5727,8 +6640,10 @@
      cannot select inside a draggable ancestor); a row or a slot is the
      target; the drop index is the slot's, or the row's upper/lower half. */
   let ED_DRAG = -1;
-  const edClearDrop = el => $$(".cz-drop-before, .cz-drop-after, .cz-drop-here, .cz-dragging", el)
-    .forEach(x => x.classList.remove("cz-drop-before", "cz-drop-after", "cz-drop-here", "cz-dragging"));
+  let ED_SHELF = "";   // a shelf block in flight (board 8: drag into the page)
+  const edClearDrop = el => { ED_SHELF = "";   // a shelf block in flight is forgotten with the marks
+    $$(".cz-drop-before, .cz-drop-after, .cz-drop-here, .cz-dragging", el)
+      .forEach(x => x.classList.remove("cz-drop-before", "cz-drop-after", "cz-drop-here", "cz-dragging")); };
   function wireEditorDnD(el) {
     el.addEventListener("pointerdown", e => {
       const h = e.target.closest && e.target.closest(".cz-edhandle");
@@ -5736,6 +6651,17 @@
       if (row) row.draggable = true;
     });
     el.addEventListener("pointerup", () => $$(".cz-edrow[draggable]", el).forEach(r => r.draggable = false));
+    // a shelf block lifted: it lands where it is dropped (a slot, or a row's
+    // upper/lower half), through the same targets a moved row uses
+    el.addEventListener("dragstart", e => {
+      const blk = e.target.closest && e.target.closest(".cz-blk");
+      if (!blk) return;
+      ED_SHELF = blk.dataset.blk || ""; ED_DRAG = -1;
+      // copyMove: the dragover below asks for "copy" on a shelf block and
+      // "move" on a row; an effect outside effectAllowed is "none" and the
+      // drop never fires (a review catch, confirmed live)
+      try { e.dataTransfer.setData("text/plain", "block:" + ED_SHELF); e.dataTransfer.effectAllowed = "copyMove"; } catch { /* no dataTransfer */ }
+    });
     el.addEventListener("dragstart", e => {
       const row = e.target.closest && e.target.closest(".cz-edrow");
       // outside an editor row this is the reader's own drag (a link, a
@@ -5748,12 +6674,12 @@
             e.dataTransfer.effectAllowed = "move"; } catch { /* a browser without dataTransfer */ }
     });
     el.addEventListener("dragover", e => {
-      if (ED_DRAG < 0) return;
+      if (ED_DRAG < 0 && !ED_SHELF) return;
       const row = e.target.closest && e.target.closest(".cz-edrow");
       const slot = e.target.closest && e.target.closest(".cz-edslot");
       if (!row && !slot) return;
       e.preventDefault();
-      try { e.dataTransfer.dropEffect = "move"; } catch { /* ditto */ }
+      try { e.dataTransfer.dropEffect = ED_SHELF ? "copy" : "move"; } catch { /* ditto */ }
       $$(".cz-drop-before, .cz-drop-after, .cz-drop-here", el)
         .forEach(x => x.classList.remove("cz-drop-before", "cz-drop-after", "cz-drop-here"));
       if (slot) slot.classList.add("cz-drop-here");
@@ -5761,7 +6687,7 @@
         row.classList.add(e.clientY < r.top + r.height / 2 ? "cz-drop-before" : "cz-drop-after"); }
     });
     el.addEventListener("drop", e => {
-      if (ED_DRAG < 0) return;
+      if (ED_DRAG < 0 && !ED_SHELF) return;
       const row = e.target.closest && e.target.closest(".cz-edrow");
       const slot = e.target.closest && e.target.closest(".cz-edslot");
       // a block dropped anywhere else in the editor (the title field, a
@@ -5772,11 +6698,11 @@
       if (slot) to = +slot.dataset.at;
       else { const r = row.getBoundingClientRect();
         to = +row.dataset.i + (e.clientY < r.top + r.height / 2 ? 0 : 1); }
-      const from = ED_DRAG; ED_DRAG = -1;
+      const from = ED_DRAG, kind = ED_SHELF; ED_DRAG = -1; ED_SHELF = "";
       edClearDrop(el);
-      movePaperBlockTo(from, to);
+      if (kind) shelfAdd(kind, to); else movePaperBlockTo(from, to);
     });
-    el.addEventListener("dragend", () => { ED_DRAG = -1; edClearDrop(el);
+    el.addEventListener("dragend", () => { ED_DRAG = -1; ED_SHELF = ""; edClearDrop(el);
       $$(".cz-edrow[draggable]", el).forEach(r => r.draggable = false); });
   }
   /* the inline add (A3): one open at a time; the ＋ it replaces takes focus
@@ -5787,6 +6713,13 @@
     $$(".cz-edpanel").forEach(x => closeEdAdd(x.closest(".cz-edslot"), true));
     const btn = $(".cz-edadd", slot); if (!btn) return;
     btn.setAttribute("aria-expanded", "true"); btn.hidden = true;
+    // a shelf pick narrows the add to one kind of thing (board 8)
+    const pick = opts.pick || ""; slot.dataset.pick = pick;
+    const PICK = { lead: ["the lead story — which meeting?", "a body, a month, a title…"],
+      over: ["over time — which thread?", "an issue’s name…"],
+      quote: ["a quote — a word said on the tape", "three characters or more of what was said…"],
+      numbers: ["in numbers — which meeting or issue?", "a body, a month, an issue’s name…"] };
+    const [label, ph] = PICK[pick] || ["find a meeting or an issue", "a body, a month, an issue’s name…"];
     const clips = readReel(REEL_KEY);
     const quick = (kind, ref, label) =>
       `<button type="button" class="btn" data-czed="hit" data-kind="${kind}" data-ref="${esc(ref)}">${esc(label)}</button>`;
@@ -5794,17 +6727,24 @@
     // the hit list is NOT a live region: ten cards re-announced per
     // keystroke would drown the field. One short status line speaks the
     // count instead; the list is there to be walked.
-    panel.innerHTML = `<label class="cz-edqlabel">find a meeting or an issue
+    panel.innerHTML = `<label class="cz-edqlabel">${esc(label)}
         <input class="cz-edq" type="search" autocomplete="off"
-          placeholder="a body, a month, an issue’s name…"></label>
+          placeholder="${esc(ph)}"></label>
       <p class="cz-edcount" role="status"></p>
       <div class="cz-edhits"></div>
       <div class="cz-edquick">
-        ${quick("note", "", "＋ a note")}
-        ${clips.length ? quick("reel", "", `＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})`) : ""}
-        ${quick("chart", "votes", "▤ votes over time")}
-        ${quick("chart", "framing", "▤ the record’s framing")}
-        ${quick("chart", "topics", "▤ recurring topics")}
+        ${pick ? "" : quick("note", "", "＋ a paragraph")}
+        ${!pick && clips.length ? quick("reel", "", `＋ your reel (${clips.length} clip${clips.length > 1 ? "s" : ""})`) : ""}
+        ${pick ? "" : quick("pick", "lead", "★ a lead story")}
+        ${pick ? "" : quick("pick", "over", "◈ over time")}
+        ${pick ? "" : quick("bs", "week", "▦ this week")}
+        ${pick ? "" : quick("bs", "threads", "⟁ threads")}
+        ${pick ? "" : quick("bs", "strip", "▤ how they talked")}
+        ${pick ? "" : quick("bs", "names", "◎ who and where")}
+        ${pick ? "" : quick("bs", "search", "⌕ a search box")}
+        ${pick ? "" : quick("chart", "votes", "▤ votes over time")}
+        ${pick ? "" : quick("chart", "framing", "▤ the record’s framing")}
+        ${pick ? "" : quick("chart", "topics", "▤ recurring topics")}
         <button type="button" class="btn cz-edclose" data-czed="close">close</button>
       </div>`;
     slot.appendChild(panel);
@@ -5944,8 +6884,9 @@
     const count = $(".cz-edcount", slot);
     if (!box || !q) return;   // closed while the index loaded
     const terms = lexTerms(q.value);
-    const is = lexRank(terms, idx.issues).slice(0, 5);
-    const ms = lexRank(terms, idx.meetings).slice(0, 5);
+    const pick = slot.dataset.pick || "";
+    const is = pick === "lead" || pick === "quote" ? [] : lexRank(terms, idx.issues).slice(0, 5);
+    const ms = pick === "over" || pick === "quote" ? [] : lexRank(terms, idx.meetings).slice(0, 5);
     const p = readPaper();
     const n = (k, one, many) => `${k} ${k === 1 ? one : many}`;
     if (idx.dark.m && idx.dark.i) {
@@ -5961,19 +6902,30 @@
     // hits paint at once; the tape's lines (C2 — a bigger plane) land after
     const gen = slot._edgen = (slot._edgen || 0) + 1;
     const countLine = ls => (is.length || ms.length || ls.length)
-      ? `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}`
-        + (ls.length ? ` · ${n(ls.length, "line", "lines")}` : "") + (terms.length ? " match" : "") + dark
+      ? (pick === "quote" ? "" : `${n(is.length, "issue", "issues")} · ${n(ms.length, "meeting", "meetings")}`)
+        + (ls.length ? `${pick === "quote" ? "" : " · "}${n(ls.length, "line", "lines")}` : "") + (terms.length ? " match" : "") + dark
       : `no match${dark}`;
     // no verdict while the tape's lines are still being read — a "no match"
     // announced now would be taken back when they land. The lines are read
     // only for three characters or more (linesSearch's own gate): "searching"
     // and "or their lines" are said only then (a review catch)
     const linesOK = terms.length > 0 && q.value.trim().length >= 3;
-    if (count) count.textContent = (linesOK && !is.length && !ms.length)
-      ? "searching the tape’s own lines…" : countLine([]);
+    // a shelf pick for a meeting, a thread or a count reads the index alone
+    // (never the tape's lines); the quote pick reads the lines alone
+    const indexPick = pick === "lead" || pick === "over" || pick === "numbers";
+    if (count) count.textContent = (pick === "quote" && !linesOK) ? ""
+      : (linesOK && !indexPick && !is.length && !ms.length) ? "searching the tape’s own lines…" : countLine([]);
     const hit = h => {
       const ref = h.kind === "m" ? { story: "meeting", pid: h.ref } : { story: "issue", slug: h.ref };
       const on = storyIndex(p, ref) >= 0;
+      // a pick narrows each hit to its one act (board 8's shelf)
+      if (pick) return `<div class="cz-edhit">
+        <span class="cz-edhit-t"><b>${esc(h.title)}</b><span class="cz-edhit-m">${esc(h.meta)}</span></span>
+        <span class="cz-edhit-a">${pick === "lead"
+          ? `<button type="button" class="btn" data-czed="hit" data-kind="lead" data-ref="${esc(h.ref)}" aria-label="“${esc(h.title)}” as the lead story">★ lead story</button>`
+          : pick === "over"
+          ? `<button type="button" class="btn" data-czed="hit" data-kind="ci" data-ref="${esc(h.ref)}" aria-label="“${esc(h.title)}” over time — its timeline">◈ over time</button>`
+          : `<button type="button" class="btn" data-czed="hit" data-kind="cn" data-ref="${h.kind === "m" ? "m:" : "i:"}${esc(h.ref)}" aria-label="“${esc(h.title)}” in numbers">▤ in numbers</button>`}</span></div>`;
       return `<div class="cz-edhit">
         <span class="cz-edhit-t"><b>${esc(h.title)}</b><span class="cz-edhit-m">${esc(h.meta)}</span></span>
         <span class="cz-edhit-a">${on
@@ -6003,6 +6955,8 @@
            ${n(idx.issues.length, "issue", "issues")}${ls ? " or their lines" : ""} matches “${esc(q.value.trim())}”${esc(dark)}</p>`;
     box.innerHTML = (is.length ? `<span class="cz-edgroup">issues</span>${is.map(hit).join("")}` : "")
       + (ms.length ? `<span class="cz-edgroup">meetings</span>${ms.map(hit).join("")}` : "");
+    if (indexPick) { if (!ms.length && !is.length) box.innerHTML = nothing(false); return; }
+    if (pick === "quote" && !linesOK) { box.innerHTML = `<p class="cz-hint">type three characters or more of a word said on the tape — its lines appear here, each a quote you can cite</p>`; return; }
     if (!linesOK) { if (!ms.length && !is.length) box.innerHTML = nothing(false); return; }
     if (!ms.length && !is.length) box.innerHTML = `<p class="cz-hint cz-edlines-wait">searching the tape’s own lines…</p>`;
     // a lines search that breaks must not strand the status line on
@@ -6450,6 +7404,9 @@
       const s = segs[id]; if (!s) continue;
       const m = meta[s[0]] || {};
       if (!inScope(m.town || "", m.body || "")) continue;
+      // a front page's scope (specs/29): its own meetings, and no other —
+      // read off SCOPE itself, so the twins that lift this function alone run
+      if (SCOPE.pids && SCOPE.pids.length && !SCOPE.pids.includes(String(m.pid || ""))) continue;
       const nx = segs[id + 1], pv = segs[id - 1];
       const after = nx && nx[0] === s[0] ? String(nx[3]) : "", before = pv && pv[0] === s[0] ? String(pv[3]) : "";
       const n = mentionsIn(s[3], after, pats);
@@ -6465,7 +7422,7 @@
     const saidAs = phrases.map(p => `“${esc(p)}”`).join(" or ");
     // the meetings the story counts are the ones in the reader's scope —
     // a body scope must not count the other bodies' nights as silence
-    const meetings = idx.meta.filter(m => m && m.pid && inScope(m.town || "", m.body || "")).map(m => ({ pid: m.pid, title: m.title || m.pid, date: m.date || "",
+    const meetings = idx.meta.filter(m => m && m.pid && inScope(m.town || "", m.body || "") && inPids(m.pid)).map(m => ({ pid: m.pid, title: m.title || m.pid, date: m.date || "",
       body: m.body || "", town: m.town || "", duration: +m.duration || 0 }));
     const hitsAll = sqHits(idx, ids, phrases);
     const latestDay = meetings.map(m => m.date).filter(d => TP_DAY.test(d)).sort().pop() || "";
@@ -6598,7 +7555,9 @@
     toast(added ? `${tpN(added, "clip")} on your tray${of} — ${next.length} in all; open the studio to re-cut, or ▶ play` : "every one of these was on your tray already");
   }
 
+  let SQ_NOTE0 = null;   // the pressed search note, to restore when a front page's scope is widened
   async function search() {
+    SQ_NOTE0 = ($("#search-note") || {}).textContent;
     // resolve the scope here rather than trusting initScope to have landed
     // first — both await the same fetch, and a search that silently ignored
     // the reader's town would be the worst of the two failures
@@ -6632,9 +7591,17 @@
       if (val) u.searchParams.set("q", val);
       if (SCOPE.town) u.searchParams.set("town", SCOPE.town);
       if (SCOPE.body) u.searchParams.set("body", SCOPE.body);
+      if (SCOPE.pids.length) u.searchParams.set("m", SCOPE.pids.join(","));
       history.replaceState(null, "", u.pathname + u.search);
       runSearch(val);
     });
+    // a front page's scope (specs/29): say it under the form, with the way out
+    if (SCOPE.pids.length && form && !$("#sq-scoped")) {
+      const wide = new URL(location.href); wide.searchParams.delete("m");
+      const line = document.createElement("p"); line.className = "hint sq-scoped"; line.id = "sq-scoped";
+      line.innerHTML = `searching inside the ${esc(tpN(SCOPE.pids.length, "meeting"))} a front page cites · <a href="${esc(wide.pathname + wide.search)}">search the whole record</a>`;
+      form.insertAdjacentElement("afterend", line);
+    }
     // instant search: debounced, and never under three characters — a two-letter
     // query is mostly noise over a lot of postings. Enter (the submit above)
     // still works for a reader who prefers it.
@@ -6691,6 +7658,15 @@
       if (story) story.innerHTML = ""; if (guide) guide.hidden = false; sqProgress(null); return; }
     if (guide) guide.hidden = true;
     sqProgress(0, "opening the record’s index…");
+    // a front page's scope (m=) is read from the edition's own index, which
+    // counts every line exactly — the Studio's first eighty across a town,
+    // filtered after, could say "nothing" over lines it never returned. Said
+    // as a choice, never as a Studio that failed to answer (a skeptic's catch).
+    if (SCOPE.pids.length) {
+      saySearchIsStatic("This search reads inside a front page’s own meetings, so it is counted from "
+        + "the edition’s index in your browser — every line, exactly. Nothing was sent anywhere.");
+      return staticSearch(q, terms, box);
+    }
     if (API && !API_DOWN) {
       const live = await liveSearch(q, terms, box);
       if (live) return;
@@ -6731,7 +7707,7 @@
       : "Search read the words you typed. Nothing about you was sent with "
         + "the query."));
 
-    const where = [SCOPE.town, SCOPE.body].filter(Boolean).join(" · ");
+    const where = scopeWords();
     if (!r.hits.length) {
       box.innerHTML = `<p class="hint">nothing in the record for “${esc(q)}”`
         + (where ? ` in ${esc(where)}` : "") + `.</p>`;
@@ -6883,10 +7859,10 @@
     // the reader has said they are not looking at — and a scoped search would
     // silently return fewer results than it found
     const total = hits.length;
-    if (SCOPE.town || SCOPE.body)
+    if (SCOPE.town || SCOPE.body || SCOPE.pids.length)
       hits = hits.filter(id => {
         const m = meta[segs[id][0]] || {};
-        return inScope(m.town || "", m.body || "");
+        return inScope(m.town || "", m.body || "") && inPids(m.pid || "");
       });
     const cut = hits.length;
     // untowned meetings ride along in every scope, so "18 in Brookline" would
@@ -6897,25 +7873,27 @@
     const noTown = SCOPE.town
       ? hits.filter(id => !((meta[segs[id][0]] || {}).town)).length : 0;
     hits = hits.slice(0, 80);
-    const where = [SCOPE.town, SCOPE.body].filter(Boolean).join(" · ");
+    const where = scopeWords();
     if (!hits.length) {
       // an empty scoped result is two different facts, and the reader is owed
       // whichever one is true: nothing anywhere, or nothing *here*
       box.innerHTML = where && total
         ? `<p class="hint">Nothing for “${esc(q)}” in ${esc(where)} — but
              ${tpN(total, "line")} elsewhere on the record.
-             <button class="btn" type="button" id="widen">search every town</button></p>`
+             <button class="btn" type="button" id="widen">${SCOPE.pids.length ? "search the whole record" : "search every town"}</button></p>`
         : `<p class="hint">nothing in the record for “${esc(q)}”. It holds ${tpN(meta.length, "meeting")}.</p>`;
       const story = $("#sq-story"); if (story) story.innerHTML = "";
       sqProgress(3, "nothing to count");
       const w = $("#widen");
       if (w) w.onclick = () => {
         const u = new URL(location.href);
-        u.searchParams.delete("town"); u.searchParams.delete("body");
+        u.searchParams.delete("town"); u.searchParams.delete("body"); u.searchParams.delete("m");
         history.replaceState(null, "", u.pathname + u.search);
         const ts = $("#townsel"), bs = $("#bodysel");
         if (ts) ts.value = ""; if (bs) bs.value = "";
-        SCOPE = { ...SCOPE, town: "", body: "" };
+        SCOPE = { ...SCOPE, town: "", body: "", pids: [] };
+        const sc = $("#sq-scoped"); if (sc) sc.remove();
+        if (SQ_NOTE0 != null) saySearchIsStatic(SQ_NOTE0);   // the scoped sentence must not outlive the scope
         runSearch(q);
       };
       return;
@@ -7273,7 +8251,7 @@
   }
   const bsDayShort = d => TP_DAY.test(String(d || "")) ? `${TP_MON[+String(d).slice(5, 7)]} ${+String(d).slice(8, 10)}` : "undated";
   const bsEsc = s => esc(s).replace(/'/g, "&#x27;");   // the press's html.escape(quote=True) — the twin holds byte for byte
-  function bsTimeline(rows, q, width, height) {
+  function bsTimeline(rows, q, width, height, unit) {
     width = width || 1160; height = height || 170;
     const said = rows.filter(r => r.n && tpIsMonth(r.date));
     const months = tpMonthRange(rows.filter(r => tpIsMonth(r.date)).map(r => r.date.slice(0, 7)));
@@ -7283,7 +8261,7 @@
     out += `<line x1="0" y1="${base}" x2="${width}" y2="${base}" stroke="#D9D1BF" stroke-width="2"/>`;
     for (const r of said.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || (a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0))) {
       const cx = x(r.date);
-      out += `<a href="${BASE}/m/${bsEsc(r.pid)}#t${Math.floor(r.first_t || 0)}" class="bs-tdot" data-pid="${bsEsc(r.pid)}"><circle cx="${r1(cx)}" cy="${base}" r="9" fill="${bsTown(r.town)}"><title>${bsEsc(r.title || r.pid)} — ${tpN(+r.n || 0, "line")}</title></circle>`
+      out += `<a href="${BASE}/m/${bsEsc(r.pid)}#t${Math.floor(r.first_t || 0)}" class="bs-tdot" data-pid="${bsEsc(r.pid)}"><circle cx="${r1(cx)}" cy="${base}" r="9" fill="${bsTown(r.town)}"><title>${bsEsc(r.title || r.pid)} — ${tpN(+r.n || 0, unit || "line")}</title></circle>`
         + `<text x="${r1(cx)}" y="${base - 22}" font-size="12" fill="#4B473E" text-anchor="middle" style="font-family:var(--font-sans)">${bsEsc(tpCutWords(r.body, 24))}</text>`
         + `<text x="${r1(cx)}" y="${base - 38}" font-size="11" fill="#6F6A5B" text-anchor="middle" style="font-family:var(--font-mono)">${bsEsc(bsDayShort(r.date))}</text></a>`;
     }
@@ -7335,11 +8313,12 @@
     for (const pid of Object.keys(perPid).sort()) clips = clips.concat(tpMerge(perPid[pid], +(by[pid] || {}).duration || 0));
     return { total: hits.length, moments, meetings, threads, months, counts, clips: clips.slice(0, BS_TA_CLIPS) };
   }
-  function bsSpark(months, counts, color) {
+  function bsSpark(months, counts, color, quiet) {
     if (!months.length) return "";
     const W = 300, H = 70, step = (W - 8) / Math.max(1, months.length - 1);
     const pts = counts.map((c, i) => [4 + i * step, H - 6 - Math.min(2, c) * 28]);
-    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="meetings that took it up, month by month">
+    // inside a link the spark is decoration — the link's own text is its name
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" ${quiet ? 'aria-hidden="true"' : 'role="img" aria-label="meetings that took it up, month by month"'}>
       <polyline points="${pts.map(p => `${r1(p[0])},${r1(p[1])}`).join(" ")}" fill="none" stroke="${color}" stroke-width="1.5" opacity=".55"/>
       ${pts.map((p, i) => counts[i] ? `<circle cx="${r1(p[0])}" cy="${r1(p[1])}" r="3" fill="${color}"><title>${TP_MON[+months[i].slice(5, 7)]}: ${tpN(counts[i], "meeting")}</title></circle>` : "").join("")}</svg>`;
   }
