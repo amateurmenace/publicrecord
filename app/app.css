@@ -169,7 +169,7 @@ h1,h2,h3{font-family:var(--font-display);font-weight:500;
 .scopebanner[hidden]{display:none}
 .scopemsg{font-size:var(--text-sm);color:var(--text-primary)}
 .scopeacts{display:flex;gap:var(--space-2);flex-wrap:wrap}
-.scopeacts .btn{font-size:var(--text-xs);padding:5px 11px}
+.scopeacts .btn{font-size:var(--text-xs);padding:6px 11px}   /* 25 px tall: a target of at least 24 (WCAG 2.5.8) */
 
 .scopeline{font-family:var(--font-mono);font-size:var(--text-xs);
   color:var(--text-secondary);margin-top:var(--space-3)}
@@ -422,7 +422,11 @@ a.fp-mcell:hover i{opacity:1}
 .fp-sterm{font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium)}
 .fp-sterm:hover{color:var(--accent)}
 .fp-sbars{display:flex;align-items:flex-end;gap:2px;height:24px;border-bottom:var(--border-w) solid var(--border-hairline)}
-.fp-sbar{flex:1;display:flex;align-items:flex-end;height:100%}
+.fp-sbar{flex:1;display:flex;align-items:flex-end;height:100%;position:relative}
+/* a slice's link reaches into the gaps beside its bar, so the row is one strip to press with no dead gaps
+   (a sweep's catch: 48 slices on a phone are 2 px bars and fail WCAG 2.5.8's 24 px there — nothing else on
+   the page opens a slice's own time; this keeps a press anywhere on the row from landing on nothing) */
+.fp-sbar::after{content:"";position:absolute;top:0;bottom:0;left:-1px;right:-1px}
 .fp-sbar i{display:block;width:100%;background:var(--accent);opacity:.8}
 .fp-sbar:hover i{opacity:1}
 .fp-sn{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--text-secondary);text-align:right}
@@ -2099,7 +2103,7 @@ a.tp-mcol:hover b{text-decoration:underline}
 .sq-story .fp-hl{font-size:24px}
 .sq-range{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:var(--space-3)}
 .sq-range .kicker{margin-right:4px}
-.sq-rb{font:var(--weight-medium) var(--text-xs)/1 var(--font-mono);cursor:pointer;padding:5px 10px;
+.sq-rb{font:var(--weight-medium) var(--text-xs)/1 var(--font-mono);cursor:pointer;padding:6px 10px;
   border-radius:999px;background:var(--surface-card);color:var(--text-secondary);
   border:var(--border-w) solid var(--border-hairline)}
 .sq-rb:hover{border-color:var(--accent);color:var(--accent)}
@@ -2575,6 +2579,12 @@ a.tp-mcol:hover b{text-decoration:underline}
 /* board 3 on a phone's screen (specs/29) — a screen's alone: an A4 page is
    718px wide and must print the wide forms (a review catch) */
 @media screen and (max-width:720px){
+  /* a finger's targets: the way back and the colophon's links stand 24 px tall (WCAG 2.5.8; a sweep's catch) */
+  .back{display:inline-block;padding:5px 0}
+  .bs-site{padding:3px 0}
+  .cov{display:inline-block;padding:4px 0}
+  .gl-index a{display:inline-block;padding:5px 0}
+  .fp-twinwrap table.twin td:first-child a,.pb-twinwrap table.twin td:first-child a{white-space:nowrap}   /* a date is not a stack of characters, where the twin's wrapper scrolls (the graph's does not: its names wrap) */
   /* the river static: its labels, dates and dashed line would be specks
      stretched to nothing, so the bands stand alone (still a link to the full
      page, where each lens is named — the sentence beneath says so), and a
