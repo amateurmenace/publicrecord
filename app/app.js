@@ -1635,6 +1635,17 @@
     filterHome(ed);
   }
 
+  /* the week link's scope (web/week.py link_of): its meetings' [town, body]
+     pairs, each two strings — decodeReel's law: whatever is not a pair is
+     dropped, never a throw, so malformed it reads as no pairs and the link
+     stands (a re-review's catch: `[1]` hid it from every reader) */
+  function wkScope(raw) {
+    let v = null;
+    try { v = JSON.parse(String(raw == null ? "" : raw)); } catch (e) { return []; }
+    return Array.isArray(v) ? v.filter(p => Array.isArray(p) && p.length === 2
+      && typeof p[0] === "string" && typeof p[1] === "string") : [];
+  }
+
   async function filterHome(ed) {
     let shown = 0, hidden = 0;
     // the lead story re-scopes with the briefs — it carries the same data-town
@@ -1646,6 +1657,14 @@
       const w = c.parentElement;
       if (w && w.classList.contains("cz-mkwrap")) w.hidden = !ok;
     });
+    // the week's link (web/week.py) names its calendar week's meetings: a scope
+    // that holds none of them hides it, as it hides their cards (a re-review's
+    // catch: a Brookline reader was offered a week of Boston's); unreadable, it stands
+    const wl = $(".wk-link[data-scope]");
+    if (wl) {
+      const pairs = wkScope(wl.dataset.scope);
+      wl.hidden = pairs.length > 0 && !pairs.some(p => inScope(p[0], p[1]));
+    }
     // the rail must say when a scope has emptied it, or an empty column reads
     // as "the record has nothing" instead of "your filter has nothing"
     let none = $("#mcards-none");

@@ -2,8 +2,8 @@
 // the record's service worker — precache the shell, keep last-read meetings,
 // and let the page announce a fresher pressing. Cache name is the corpus
 // fingerprint (deterministic; a new edition = a new cache).
-const CACHE = 'cz-record-2.2.10-64730f48c11c9e8e';
-const SHELL = ["/app/","/app/app.css?v=2.2.10","/app/app.js?v=2.2.10","/app/favicon.svg","/app/manifest.json","/app/stats.json","/app/s/","/app/watching/","/app/officials/","/app/p/","/app/front-pages/","/app/r/","/app/ai/","/app/search/meta.json","/app/issues/index.json","/app/towns.json"];
+const CACHE = 'cz-record-2.2.11-64730f48c11c9e8e-w36eba6c30d';
+const SHELL = ["/app/","/app/app.css?v=2.2.11","/app/app.js?v=2.2.11","/app/favicon.svg","/app/manifest.json","/app/stats.json","/app/s/","/app/watching/","/app/officials/","/app/p/","/app/front-pages/","/app/r/","/app/ai/","/app/search/meta.json","/app/issues/index.json","/app/towns.json"];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });

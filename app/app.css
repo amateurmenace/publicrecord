@@ -1654,6 +1654,13 @@ html.cz-m-studio .cz-studio .btn.primary{background:var(--studio-accent-text);
 .cz-mkwrap-card>.mcard{width:100%}
 .cz-mkwrap-card>.cz-mk{border-color:transparent;padding:5px 6px;align-self:flex-end}
 .cz-mkwrap-card>.cz-mk:hover{border-color:var(--accent)}
+/* a week card, wrapped: in the week's row the wrap takes the card's width, and inside it the card keeps its own
+   height — the card's 250 px basis, a width in the row, was its height in this column and cut its last lines
+   off (a sweep's catch, 11–59 px on the live front page); on the week's own page the grid sizes the wrap */
+.bs-weekrow>.cz-mkwrap-card{width:250px;flex:0 0 250px}
+.cz-mkwrap-card>.mcard.bs-week-card{flex:1 0 auto;width:100%}
+.wk-cards>.cz-mkwrap-card{width:auto;flex:none}
+@media (max-width:720px){.bs-weekrow>.cz-mkwrap-card{width:230px;flex:0 0 230px}}
 .cz-mkwrap-lead{display:block;position:relative}
 .cz-mkwrap-lead>.cz-mk{position:absolute;top:0;right:0}
 /* the lead's kicker keeps the button's width clear, so a 320px phone never
@@ -2405,6 +2412,38 @@ a.tp-mcol:hover b{text-decoration:underline}
 .bs-weekrow{display:flex;gap:16px;overflow-x:auto;padding-bottom:6px;margin-top:14px}
 .mcard.bs-week-card{width:250px;flex:0 0 250px}
 .bs-week .bodycard{margin-top:12px}
+
+/* ============================ the week in the record (web/week.py) — wk- ============================ */
+.wk-link{margin:14px 0 0;font-family:var(--font-mono);font-size:var(--text-xs)}
+.wk-link a{color:var(--write);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--rule)}
+.wk-page{max-width:1160px}
+.wk-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;margin-top:14px}
+.wk-cards>.mcard.bs-week-card{width:auto;flex:none}   /* a card the grid holds itself; a wrapped one fills its wrap */
+@media print{.wk-cards>*,.wk-list li{break-inside:avoid}.wk-part .bs-sechead{break-after:avoid}}
+/* the rest of a week's threads: on paper the closed list gives way to its count and address; opened, it prints */
+.wk-rest summary{margin-top:10px;cursor:pointer;font:var(--weight-bold) var(--text-xs)/1.4 var(--font-mono);color:var(--text-secondary)}
+.wk-rest-print{display:none}
+@media print{.wk-rest summary{display:none}.wk-rest:not([open])+.wk-rest-print{display:block}}
+.wk-title{font-family:var(--font-display);font-weight:500;font-size:44px;line-height:1.08;margin:6px 0 10px;color:var(--ink)}
+.wk-nav{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:10px 0 4px;font-family:var(--font-mono);font-size:var(--text-xs)}
+.wk-nav-a{color:var(--ink-2);text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--rule)}
+.wk-nav-a:hover{color:var(--write)}
+.wk-part{margin-top:34px}
+.wk-head{font-family:var(--font-display);font-style:italic;font-size:15px;line-height:1.3;color:var(--ink-2)}
+.wk-list{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--rule);max-width:900px}
+.wk-list li{border-bottom:1px solid var(--rule)}
+.wk-list a{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px;padding:10px 2px;color:var(--ink)}
+.wk-list a:hover{color:var(--write)}
+.wk-when{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted)}
+.wk-what{flex:1 1 360px;min-width:0}
+.wk-out{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--ink);text-transform:uppercase;letter-spacing:.06em}
+.wk-sum{font-family:var(--font-display);font-weight:500;font-size:20px}
+.wk-threads b{font-weight:var(--weight-medium)}
+.wk-origin{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--muted);font-style:italic}   /* said, not shouted: the name is the thread's */
+.wk-more{margin-top:8px}
+.wk-weeks{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:var(--text-sm)}
+.wk-weeks a{display:inline-flex;gap:8px;align-items:baseline;padding:4px 0;color:var(--ink)}
+.wk-weeks a[aria-current]{color:var(--write);text-decoration:underline;text-underline-offset:3px}
 .bs-threadgrid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;margin-top:14px}
 .bs-thread{display:flex;flex-direction:column;gap:8px;padding:14px;background:var(--card);border:1px solid var(--rule);border-radius:6px;min-width:0}
 .bs-thread-name{font-family:var(--font-display);font-size:20px;font-weight:500;color:var(--ink);line-height:1.15}
@@ -2584,6 +2623,8 @@ a.tp-mcol:hover b{text-decoration:underline}
   .bs-site{padding:3px 0}
   .cov{display:inline-block;padding:4px 0}
   .gl-index a{display:inline-block;padding:5px 0}
+  .wk-title{font-size:32px}
+  .wk-nav-a,.wk-link a{display:inline-block;padding:4px 0}
   .fp-twinwrap table.twin td:first-child a,.pb-twinwrap table.twin td:first-child a{white-space:nowrap}   /* a date is not a stack of characters, where the twin's wrapper scrolls (the graph's does not: its names wrap) */
   /* the river static: its labels, dates and dashed line would be specks
      stretched to nothing, so the bands stand alone (still a link to the full
